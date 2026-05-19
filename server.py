@@ -92,7 +92,17 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                     "cdn_site": CDN_SITE
                 }
                 self.wfile.write(json.dumps(config_data).encode("utf-8"))
+        elif self.path == "/python-version":
+            self.send_response(200)
+            self._cors_headers()
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            if self.command != "HEAD":
+                import sys
+                version_str = f"Python: {sys.version}\nPlatform: {sys.platform}\nCwd: {os.getcwd()}\n"
+                self.wfile.write(version_str.encode("utf-8"))
             return
+            
 
         # --- Proxy verso il sito principale ---
         elif self.path.startswith("/proxy/"):
