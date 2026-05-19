@@ -587,51 +587,84 @@ async function playTitle(titleId, episodeId = null) {
   try {
     currentView = 'player';
     playerEl.style.display = 'block';
-    playerEl.innerHTML = `<div style="color: #fff; padding: 20px; font-size: 24px; text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">Caricamento in corso...</div>`;
+    playerEl.innerHTML = `
+      <div id="debug-overlay" style="position: absolute; top: 10px; left: 10px; z-index: 9999; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; font-size: 14px; font-family: monospace; white-space: pre-wrap; max-width: 80%; pointer-events: none;">[Debug Log]</div>
+      <video id="native-player" autoplay style="width: 100%; height: 100%; background: #000;"></video>
+    `;
     
+    const debugLog = document.getElementById('debug-overlay');
+    const log = (msg) => { debugLog.innerHTML += `\n${msg}`; console.log(msg); };
+    
+    log(`Fetching embed URL...`);
     const embedUrl = await fetchEmbedUrl(titleId, episodeId);
-    if (!embedUrl) throw new Error("Embed URL non trovato");
     
-    // Extract the direct stream playlist URL
+    log(`Extracting stream URL from: ${embedUrl.substring(0, 50)}...`);
     const streamUrl = await extractStreamUrl(embedUrl);
-    
-    // Render native video player
-    playerEl.innerHTML = `<video id="native-player" autoplay style="width: 100%; height: 100%; background: #000;"></video>`;
+    log(`Stream URL ready.`);
     
     const video = document.getElementById('native-player');
     
-    // Attempt play (only use native for Safari; force hls.js on Tizen, Chrome, Firefox, PC)
+    video.addEventListener('error', (e) => {
+      const err = video.error;
+      log(`Native Video Error: ${err ? err.code + ' ' + err.message : 'Unknown'}`);
+    });
+    
     const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Tizen');
     
+    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${navigator.userAgent.includes('Tizen')}`);
+    
     if (isSafariPlayer && video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari)
+      log(`Using Native Safari Player...`);
       video.src = streamUrl;
-      video.play().catch(e => console.log("Play failed: ", e));
+      video.play().catch(e => log(`Play failed: ${e.message}`));
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      // Use hls.js (Chrome, Firefox, PC, Tizen, webOS)
+      log(`Using hls.js player (Version: ${Hls.version || 'unknown'})...`);
       const hls = new Hls({
-        maxMaxBufferLength: 10, // Optimize memory consumption
-        enableWorker: true
+        maxMaxBufferLength: 10,
+        enableWorker: true,
+        debug: false
       });
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, function() {
-        video.play().catch(e => console.log("Play failed: ", e));
+        log(`HLS Manifest parsed. Attempting play...`);
+        video.play().catch(e => log(`Play failed: ${e.message}`));
       });
-      
-      // Store hls instance on the player container to destroy it on close
+      hls.on(Hls.Events.ERROR, function(event, data) {
+        log(`HLS Error [${data.type}]: ${data.details}`);
+        if (data.fatal) {
+          log(`Fatal error! Trying to recover...`);
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError();
+              break;
+            default:
+              hls.destroy();
+              log(`HLS Destroyed.`);
+              break;
+          }
+        }
+      });
       playerEl._hlsInstance = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // General native HLS fallback
+      log(`Fallback Native Player (Hls.js not supported)...`);
       video.src = streamUrl;
-      video.play().catch(e => console.log("Play failed: ", e));
+      video.play().catch(e => log(`Play failed: ${e.message}`));
     } else {
+      log(`Error: Browser does not support HLS or Hls.js`);
       throw new Error("Il tuo browser non supporta la riproduzione HLS.");
     }
   } catch (err) {
     console.error(err);
-    alert("Errore caricamento player: " + err.message);
-    stopPlayer();
+    if (document.getElementById('debug-overlay')) {
+      document.getElementById('debug-overlay').innerHTML += `\nEXCEPTION: ${err.message}`;
+    } else {
+      alert("Errore caricamento player: " + err.message);
+    }
+    setTimeout(() => stopPlayer(), 10000); // Wait 10s to read log before closing
   }
 }
 
