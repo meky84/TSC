@@ -109,6 +109,14 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
             target_path = self.path[len("/vixcloud"):]
             self._proxy_request("https://vixcloud.co" + target_path)
 
+        # --- Proxy verso Vixcontent (CDN video) ---
+        elif self.path.startswith("/vixcontent/"):
+            parts = self.path[len("/vixcontent/"):].split("/", 1)
+            subdomain = parts[0]
+            remaining_path = parts[1] if len(parts) > 1 else ""
+            target_url = f"https://{subdomain}.vix-content.net/{remaining_path}"
+            self._proxy_request(target_url)
+
         # --- File locali con fallback proxy ---
         else:
             clean_path = self.path.split("?")[0].lstrip("/")
@@ -151,6 +159,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         proxy_base = f"{proto}://{host}"
                         text = text.replace("https://vixcloud.co", f"{proxy_base}/vixcloud")
                         text = text.replace(r"https:\/\/vixcloud.co", fr"{proxy_base}\/vixcloud")
+                        text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
+                        text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base.replace('/', r'\/')}\/vixcontent\/\1", text)
                         body = text.encode("utf-8")
                     except Exception as e:
                         pass
