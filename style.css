@@ -62,6 +62,26 @@ html, body {
   box-shadow: 0 0 calc(8px * var(--scale)) rgba(29, 185, 84, 0.4);
 }
 
+.clear-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: calc(6px * var(--scale));
+  color: rgba(255, 255, 255, 0.7);
+  font-size: calc(12px * var(--scale));
+  padding: calc(6px * var(--scale)) calc(12px * var(--scale));
+  margin-left: calc(10px * var(--scale));
+  cursor: pointer;
+  transition: var(--transition);
+  outline: none;
+}
+
+.clear-btn.focused, .clear-btn:hover {
+  background: rgba(255, 59, 48, 0.2);
+  border-color: #ff3b30;
+  color: #fff;
+  box-shadow: 0 0 calc(8px * var(--scale)) rgba(255, 59, 48, 0.4);
+}
+
 /* Filters styling */
 .filters {
   display: flex;

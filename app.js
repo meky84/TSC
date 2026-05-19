@@ -43,7 +43,7 @@ let focusedGalleryIndex = 0;
 
 // Search & Filter Navigation State
 let galleryFocusArea = 'grid'; // 'search' or 'grid'
-let searchFocusedIndex = 0;    // 0: input, 1: filter-all, 2: filter-movie, 3: filter-tv
+let searchFocusedIndex = 0;    // 0: input, 1: btn-clear, 2: filter-all, 3: filter-movie, 4: filter-tv
 let activeFilter = 'all';      // 'all', 'movie', 'tv'
 
 // Details Navigation State
@@ -56,7 +56,7 @@ let loadedTitleData = null; // Stored metadata of the opened title
 
 // DOM Elements
 let galleryEl, detailsEl, playerEl;
-let searchInputEl, filterAllEl, filterMovieEl, filterTvEl;
+let searchInputEl, btnClearEl, filterAllEl, filterMovieEl, filterTvEl;
 
 // Helper to fetch JSON data from the page's data-page attribute
 async function fetchData() {
@@ -208,15 +208,17 @@ function selectFilter(filterName) {
 // Update DOM classes to reflect gallery focus
 function updateGalleryFocus() {
   // Remove focus class from all elements in the main gallery/search area
-  const focusedElements = document.querySelectorAll('.search-container .focused, #search-bar .focused, .grid .card.focused, .filters .filter-btn.focused');
+  const focusedElements = document.querySelectorAll('.search-container .focused, #search-bar .focused, .grid .card.focused, .filters .filter-btn.focused, .clear-btn.focused');
   focusedElements.forEach(el => el.classList.remove('focused'));
   
   if (galleryFocusArea === 'search') {
     if (searchFocusedIndex === 0) {
       searchInputEl.classList.add('focused');
+    } else if (searchFocusedIndex === 1) {
+      if (btnClearEl) btnClearEl.classList.add('focused');
     } else {
       const btns = [filterAllEl, filterMovieEl, filterTvEl];
-      const targetBtn = btns[searchFocusedIndex - 1];
+      const targetBtn = btns[searchFocusedIndex - 2];
       if (targetBtn) targetBtn.classList.add('focused');
     }
   } else if (galleryFocusArea === 'grid') {
@@ -598,16 +600,15 @@ async function playTitle(titleId, episodeId = null) {
     
     const video = document.getElementById('native-player');
     
-    // Attempt play
-    const isTizenPlayer = (window.tizen !== undefined || navigator.userAgent.includes('Tizen'));
-    const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome');
+    // Attempt play (only use native for Safari; force hls.js on Tizen, Chrome, Firefox, PC)
+    const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Tizen');
     
-    if ((isTizenPlayer || isSafariPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari, Tizen, webOS)
+    if (isSafariPlayer && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
       video.src = streamUrl;
       video.play().catch(e => console.log("Play failed: ", e));
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      // Fallback using hls.js (Chrome, Firefox, PC)
+      // Use hls.js (Chrome, Firefox, PC, Tizen, webOS)
       const hls = new Hls({
         maxMaxBufferLength: 10, // Optimize memory consumption
         enableWorker: true
@@ -659,10 +660,10 @@ function isBackKey(key, keyCode) {
 function handleGalleryKeys(key, keyCode, e) {
   if (galleryFocusArea === 'search') {
     if (key === 'ArrowRight') {
-      searchFocusedIndex = (searchFocusedIndex + 1) % 4;
+      searchFocusedIndex = (searchFocusedIndex + 1) % 5;
       updateGalleryFocus();
     } else if (key === 'ArrowLeft') {
-      searchFocusedIndex = (searchFocusedIndex - 1 + 4) % 4;
+      searchFocusedIndex = (searchFocusedIndex - 1 + 5) % 5;
       updateGalleryFocus();
     } else if (key === 'ArrowDown') {
       const cards = galleryEl.querySelectorAll('.card');
@@ -679,10 +680,13 @@ function handleGalleryKeys(key, keyCode, e) {
         }
         searchInputEl.focus();
       } else if (searchFocusedIndex === 1) {
-        selectFilter('all');
+        if (searchInputEl) searchInputEl.value = '';
+        performSearch();
       } else if (searchFocusedIndex === 2) {
-        selectFilter('movie');
+        selectFilter('all');
       } else if (searchFocusedIndex === 3) {
+        selectFilter('movie');
+      } else if (searchFocusedIndex === 4) {
         selectFilter('tv');
       }
     }
@@ -886,23 +890,39 @@ function bindRemote() {
     if (window.tizen && tizen.application) {
       try {
         tizen.application.getCurrentApplication().exit();
+        return;
       } catch (err) {
-        window.close();
+        console.warn("Tizen application exit failed:", err);
       }
-    } else {
-      window.close();
     }
+    try {
+      window.close();
+    } catch (e) {}
+    try {
+      if (window.history && window.history.length > 1) {
+        window.history.back();
+      }
+    } catch (e) {}
+    try {
+      window.location.href = "about:blank";
+    } catch (e) {}
   }
   
-  // Force exit when app goes to background (pressed Home button)
+  // Force exit when app goes to background (pressed Home button), reload on resume to start fresh
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      if (currentView === 'player') stopPlayer();
       exitApp();
+    } else {
+      window.location.reload();
     }
   });
   document.addEventListener('webkitvisibilitychange', () => {
     if (document.webkitHidden) {
+      if (currentView === 'player') stopPlayer();
       exitApp();
+    } else {
+      window.location.reload();
     }
   });
   
@@ -946,9 +966,17 @@ window.addEventListener('load', async () => {
     
     // Bind search and filter DOM elements
     searchInputEl = document.getElementById('search-input');
+    btnClearEl = document.getElementById('btn-clear');
     filterAllEl = document.getElementById('filter-all');
     filterMovieEl = document.getElementById('filter-movie');
     filterTvEl = document.getElementById('filter-tv');
+    
+    if (btnClearEl) {
+      btnClearEl.addEventListener('click', () => {
+        if (searchInputEl) searchInputEl.value = '';
+        performSearch();
+      });
+    }
     
     // Bind Enter key listener inside search input
     searchInputEl.addEventListener('keydown', e => {
