@@ -219,8 +219,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         # Rimuovi script pubblicitari e anti-debugger da Vixcloud
                         if "text/html" in content_type:
                             text = re.sub(r'<script[^>]*sechw\.com[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-                            text = re.sub(r'<script[^>]*>[\s\S]*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
-                            text = re.sub(r'<script[^>]*>[\s\S]*?oe\.entries[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            text = re.sub(r'<script[^>]*>(?:(?!<script)[\s\S])*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            text = re.sub(r'<script[^>]*>(?:(?!<script)[\s\S])*?oe\.entries[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
                             # Previene i redirect javascript forzati sostituendo window.top e location.replace
                             text = text.replace("window.top", "window.self")
                             text = text.replace("top.location", "self.location")
