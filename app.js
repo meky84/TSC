@@ -569,8 +569,11 @@ async function extractStreamUrl(embedUrl) {
   let streamUrl = `${cleanPlaylistUrl}?token=${token}&expires=${expires}&b=1`;
   console.log("Constructed playlist URL:", streamUrl);
   
-  // Rewrite to proxy
-  if (streamUrl.includes('https://vixcloud.co')) {
+  // Rewrite to proxy only on local PC development (localhost) to bypass CORS.
+  // On Tizen/TV, we stream directly from vixcloud.co to avoid the 403 Cloudflare blocks on cloud proxies (like Render).
+  const isLocalhost = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const isTizen = (window.tizen !== undefined || navigator.userAgent.includes('Tizen'));
+  if (isLocalhost && !isTizen && streamUrl.includes('https://vixcloud.co')) {
     streamUrl = streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
   }
   
