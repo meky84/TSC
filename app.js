@@ -520,175 +520,105 @@ function updateDetailsFocus() {
       });
     }
   }
-}
-
-// Get the video element from the outermost or innermost same-origin iframe
+}// Get the video element from the player view
 function getPlayerVideo() {
-  const iframe = document.getElementById('player-iframe');
-  if (!iframe) return null;
-  try {
-    const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
-    if (!outerDoc) return null;
-    const innerIframe = outerDoc.querySelector('iframe');
-    if (innerIframe) {
-      const innerDoc = innerIframe.contentDocument || innerIframe.contentWindow.document;
-      if (innerDoc) {
-        return innerDoc.querySelector('video');
-      }
-    }
-    return outerDoc.querySelector('video');
-  } catch (err) {
-    return null;
+  return document.getElementById('native-player');
+}
+
+// Extract the direct HLS stream URL from the StreamingCommunity embed URL
+async function extractStreamUrl(embedUrl) {
+  // 1. Fetch StreamingCommunity embed page (proxied)
+  let scEmbedUrl = embedUrl;
+  if (scEmbedUrl.includes(baseSite)) {
+    scEmbedUrl = scEmbedUrl.replace(baseSite, PROXY_URL + '/proxy');
   }
+  
+  console.log("Fetching SC embed iframe:", scEmbedUrl);
+  const scResponse = await fetch(scEmbedUrl);
+  const scHtml = await scResponse.text();
+  
+  // Extract Vixcloud iframe URL
+  const iframeMatch = scHtml.match(/<iframe[^>]+src=["']([^"']+)["']/);
+  if (!iframeMatch) throw new Error("Vixcloud iframe non trovato nella pagina di embed");
+  let vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
+  
+  // 2. Fetch Vixcloud page (proxied)
+  if (vixcloudUrl.includes('https://vixcloud.co')) {
+    vixcloudUrl = vixcloudUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+  }
+  
+  console.log("Fetching Vixcloud HTML:", vixcloudUrl);
+  const vixResponse = await fetch(vixcloudUrl);
+  const vixHtml = await vixResponse.text();
+  
+  // Extract window.masterPlaylist params using regex
+  const tokenMatch = vixHtml.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+  const expiresMatch = vixHtml.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+  const urlMatch = vixHtml.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
+  
+  if (!tokenMatch || !expiresMatch || !urlMatch) {
+    throw new Error("Impossibile estrarre i parametri di streaming da Vixcloud");
+  }
+  
+  const token = tokenMatch[1];
+  const expires = expiresMatch[1];
+  const playlistBaseUrl = urlMatch[1];
+  
+  // 3. Construct stream URL
+  let streamUrl = `${playlistBaseUrl}?token=${token}&expires=${expires}&b=1`;
+  console.log("Constructed playlist URL:", streamUrl);
+  
+  // Rewrite to proxy
+  if (streamUrl.includes('https://vixcloud.co')) {
+    streamUrl = streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+  }
+  
+  return streamUrl;
 }
 
-// Automatically play the video inside the iframe and block popups using same-origin injection
-function setupPlayerIframe(iframe) {
-  let attempts = 0;
-  const maxAttempts = 100; // Poll for 20 seconds
-  
-  // Continuously override window.open inside BOTH the outer and inner iframe to block popups
-  const popupBlockerInterval = setInterval(() => {
-    try {
-      // 1. Block on outer iframe
-      const outerWin = iframe.contentWindow;
-      if (outerWin) {
-        outerWin.open = function() { return null; };
-        if (outerWin.parent) outerWin.parent.open = function() { return null; };
-      }
-      
-      // 2. Block on inner Vixcloud iframe (if present)
-      const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
-      if (outerDoc) {
-        const innerIframe = outerDoc.querySelector('iframe');
-        if (innerIframe) {
-          const innerWin = innerIframe.contentWindow;
-          if (innerWin) {
-            innerWin.open = function() { return null; };
-            if (innerWin.parent) innerWin.parent.open = function() { return null; };
-          }
-        }
-      }
-    } catch (err) {}
-  }, 10); // Run at 100Hz to catch dynamic scripts
-  
-  // Autoplay, click interceptor, keydown forwarding, and play trigger
-  const autoplayInterval = setInterval(() => {
-    attempts++;
-    if (attempts > maxAttempts) {
-      clearInterval(autoplayInterval);
-      clearInterval(popupBlockerInterval);
-      return;
-    }
-    
-    try {
-      const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
-      if (!outerDoc) return;
-      
-      const innerIframe = outerDoc.querySelector('iframe');
-      if (!innerIframe) return;
-      
-      const innerDoc = innerIframe.contentDocument || innerIframe.contentWindow.document;
-      if (!innerDoc) return;
-      
-      // A. Intercept clicks inside inner iframe to block popup triggers
-      if (!innerDoc._clickIntercepted) {
-        innerDoc._clickIntercepted = true;
-        innerDoc.addEventListener('click', e => {
-          const target = e.target.closest('a');
-          if (target && target.href) {
-            if (!target.href.includes('localhost') && !target.href.includes('streamingcommunity')) {
-              console.log("Blocked ad link click inside inner iframe:", target.href);
-              e.preventDefault();
-              e.stopPropagation();
-            }
-          }
-        }, true);
-      }
-      
-      // B. Forward keys from inner iframe to the main app handler (crucial when iframe gets focus!)
-      if (!innerDoc._keydownBound) {
-        innerDoc._keydownBound = true;
-        innerDoc.addEventListener('keydown', e => {
-          console.log("Keydown forwarded from inner iframe:", e.key);
-          handlePlayerKeys(e.key);
-          if (isBackKey(e.key)) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        }, true);
-      }
-      
-      // C. Forward keys from outer iframe as well
-      if (!outerDoc._keydownBound) {
-        outerDoc._keydownBound = true;
-        outerDoc.addEventListener('keydown', e => {
-          console.log("Keydown forwarded from outer iframe:", e.key);
-          handlePlayerKeys(e.key);
-          if (isBackKey(e.key)) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        }, true);
-      }
-      
-      // D. Try playing the HTML5 video element directly
-      const video = innerDoc.querySelector('video');
-      if (video) {
-        video.muted = false;
-        video.play().then(() => {
-          console.log("Video played successfully inside Vixcloud iframe");
-          clearInterval(autoplayInterval);
-          clearInterval(popupBlockerInterval);
-        }).catch(err => {
-          // Keep trying or fallback to click
-        });
-      }
-      
-      // E. Click the Vixcloud or Plyr play button overlay if it exists
-      const playButtons = innerDoc.querySelectorAll('.vjs-big-play-button, .plyr__control--large, .jw-display-icon-container, button[aria-label="Play"], .play-button, [class*="play"]');
-      for (const btn of playButtons) {
-        if (btn.offsetWidth > 0 || btn.offsetHeight > 0) {
-          console.log("Clicking Vixcloud play button overlay");
-          btn.click();
-          clearInterval(autoplayInterval);
-          clearInterval(popupBlockerInterval);
-          break;
-        }
-      }
-    } catch (err) {
-      // Ignore cross-frame errors if loaded incompletely
-    }
-  }, 200);
-}
-
-// Launch Video Player using local iframe proxy without sandbox crashes
+// Launch Video Player using HTML5 video tag with direct HLS stream
 async function playTitle(titleId, episodeId = null) {
   try {
     currentView = 'player';
     playerEl.style.display = 'block';
-    playerEl.innerHTML = `<div style="color: #fff; padding: 20px; font-size: 24px; text-align: center;">Caricamento player in corso...</div>`;
+    playerEl.innerHTML = `<div style="color: #fff; padding: 20px; font-size: 24px; text-align: center; height: 100%; display: flex; align-items: center; justify-content: center;">Caricamento in corso...</div>`;
     
     const embedUrl = await fetchEmbedUrl(titleId, episodeId);
-    if (!embedUrl) throw new Error("Embed URL not found");
+    if (!embedUrl) throw new Error("Embed URL non trovato");
     
-    // Redirect through local proxy to bypass CORS/sandboxing issues
-    let localUrl = embedUrl;
-    if (embedUrl.includes(baseSite)) {
-      localUrl = embedUrl.replace(baseSite, PROXY_URL + '/proxy');
-    } else if (embedUrl.includes('https://vixcloud.co')) {
-      localUrl = embedUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+    // Extract the direct stream playlist URL
+    const streamUrl = await extractStreamUrl(embedUrl);
+    
+    // Render native video player
+    playerEl.innerHTML = `<video id="native-player" autoplay style="width: 100%; height: 100%; background: #000;"></video>`;
+    
+    const video = document.getElementById('native-player');
+    
+    // Attempt play
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari, Tizen, webOS)
+      video.src = streamUrl;
+      video.play().catch(e => console.log("Play failed: ", e));
+    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+      // Fallback using hls.js (Chrome, Firefox, PC)
+      const hls = new Hls({
+        maxMaxBufferLength: 10, // Optimize memory consumption
+        enableWorker: true
+      });
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+        video.play().catch(e => console.log("Play failed: ", e));
+      });
+      
+      // Store hls instance on the player container to destroy it on close
+      playerEl._hlsInstance = hls;
+    } else {
+      throw new Error("Il tuo browser non supporta la riproduzione HLS.");
     }
-    
-    // Crucial: Removed HTML5 sandbox attribute to prevent player anti-sandbox scripts from crashing.
-    // Instead, we use setupPlayerIframe same-origin overrides to block popups.
-    playerEl.innerHTML = `<iframe id="player-iframe" src="${localUrl}" allowfullscreen></iframe>`;
-    
-    const iframe = document.getElementById('player-iframe');
-    setupPlayerIframe(iframe);
   } catch (err) {
     console.error(err);
-    alert("Impossibile caricare il player: " + err.message);
+    alert("Errore caricamento player: " + err.message);
     stopPlayer();
   }
 }
@@ -697,13 +627,22 @@ async function playTitle(titleId, episodeId = null) {
 function stopPlayer() {
   currentView = 'details';
   playerEl.style.display = 'none';
-  playerEl.innerHTML = ''; // Destroys iframe to stop sound and video
+  
+  // Clean up hls.js instance if exists
+  if (playerEl._hlsInstance) {
+    try {
+      playerEl._hlsInstance.destroy();
+    } catch (e) {}
+    playerEl._hlsInstance = null;
+  }
+  
+  playerEl.innerHTML = ''; // Destroys video element to stop sound and video
   updateDetailsFocus();
 }
 
 // Keyboard and Remote Control key down mapping
-function isBackKey(key) {
-  return key === 'Backspace' || key === 'Escape' || key === 'ArrowBack' || key === 'Back' || key === 'BrowserBack' || key === '\\' || key === '/';
+function isBackKey(key, keyCode) {
+  return key === 'Backspace' || key === 'Escape' || key === 'ArrowBack' || key === 'Back' || key === 'BrowserBack' || key === '\\' || key === '/' || keyCode === 10009 || key === 'XF86Backspace';
 }
 
 function handleGalleryKeys(key) {
@@ -777,8 +716,8 @@ function handleGalleryKeys(key) {
   }
 }
 
-function handleDetailsKeys(key) {
-  if (isBackKey(key)) {
+function handleDetailsKeys(key, keyCode) {
+  if (isBackKey(key, keyCode)) {
     currentView = 'gallery';
     detailsEl.style.display = 'none';
     loadedTitleData = null;
@@ -882,8 +821,8 @@ function handleDetailsKeys(key) {
   }
 }
 
-function handlePlayerKeys(key) {
-  if (isBackKey(key)) {
+function handlePlayerKeys(key, keyCode) {
+  if (isBackKey(key, keyCode)) {
     stopPlayer();
     return;
   }
@@ -891,8 +830,16 @@ function handlePlayerKeys(key) {
   const video = getPlayerVideo();
   if (!video) return;
   
-  // Pause/Play controls with Enter or Space
-  if (key === 'Enter' || key === ' ') {
+  // Play/Pause controls (Toggle / Play / Pause keys)
+  const isPlayKey = key === 'MediaPlay' || keyCode === 415;
+  const isPauseKey = key === 'MediaPause' || keyCode === 19;
+  const isToggleKey = key === 'Enter' || key === ' ' || key === 'MediaPlayPause' || keyCode === 10252;
+  
+  if (isPlayKey) {
+    try { video.play(); } catch (err) {}
+  } else if (isPauseKey) {
+    try { video.pause(); } catch (err) {}
+  } else if (isToggleKey) {
     try {
       if (video.paused) {
         video.play();
@@ -918,27 +865,61 @@ function handlePlayerKeys(key) {
 function bindRemote() {
   updateGalleryFocus();
   
+  // Exit application helper
+  function exitApp() {
+    console.log("Exiting application...");
+    if (window.tizen && tizen.application) {
+      try {
+        tizen.application.getCurrentApplication().exit();
+      } catch (err) {
+        window.close();
+      }
+    } else {
+      window.close();
+    }
+  }
+  
+  // Force exit when app goes to background (pressed Home button)
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      exitApp();
+    }
+  });
+  document.addEventListener('webkitvisibilitychange', () => {
+    if (document.webkitHidden) {
+      exitApp();
+    }
+  });
+  
   document.addEventListener('keydown', e => {
     // Intercept Back key to prevent default TV actions (like exiting app) if we are in details/player views
-    if (currentView !== 'gallery' && isBackKey(e.key)) {
+    if (currentView !== 'gallery' && isBackKey(e.key, e.keyCode)) {
       e.preventDefault();
     }
     
     if (currentView === 'gallery') {
       // If the input has focus, let the browser capture key events (except Escape/Backspace which exits focus)
       if (document.activeElement === searchInputEl) {
-        if (e.key === 'Escape' || e.key === 'Back' || e.key === 'BrowserBack' || e.key === 'ArrowBack') {
+        if (isBackKey(e.key, e.keyCode)) {
           searchInputEl.blur();
           updateGalleryFocus();
           e.preventDefault();
         }
         return; // Don't intercept normal typing keys
       }
-      handleGalleryKeys(e.key);
+      
+      // If not in input, and back key is pressed, exit application
+      if (isBackKey(e.key, e.keyCode)) {
+        e.preventDefault();
+        exitApp();
+        return;
+      }
+      
+      handleGalleryKeys(e.key, e.keyCode);
     } else if (currentView === 'details') {
-      handleDetailsKeys(e.key);
+      handleDetailsKeys(e.key, e.keyCode);
     } else if (currentView === 'player') {
-      handlePlayerKeys(e.key);
+      handlePlayerKeys(e.key, e.keyCode);
     }
   });
 }
@@ -963,6 +944,16 @@ window.addEventListener('load', async () => {
         e.stopPropagation();
       }
     });
+    
+    // Bind Form submit (catches virtual keyboard "Done" / "Fatto" / Enter arrow button clicks)
+    const searchForm = document.getElementById('search-form');
+    if (searchForm) {
+      searchForm.addEventListener('submit', e => {
+        e.preventDefault();
+        performSearch();
+        searchInputEl.blur();
+      });
+    }
     
     await loadProxyConfig();
     await renderGallery();

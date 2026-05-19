@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>StreamCom TV</title>
     <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
 </head>
 <body>
     <div id="search-bar" class="search-container">
-        <input type="text" id="search-input" placeholder="Premere Invio per cercare..." />
+        <form id="search-form" action="" onsubmit="return false;">
+            <input type="search" id="search-input" placeholder="Cerca un titolo..." enterkeyhint="search" autocomplete="off" />
+        </form>
         <div class="filters">
             <button id="filter-all" class="filter-btn active">Tutti</button>
             <button id="filter-movie" class="filter-btn">Film</button>
