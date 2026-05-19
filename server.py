@@ -168,7 +168,7 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
         }
 
         # Copia gli header Range ed altri essenziali per lo streaming video
-        for h in ["Range", "If-Range", "Accept-Encoding"]:
+        for h in ["Range", "If-Range"]:
             if h in self.headers:
                 headers[h] = self.headers[h]
 
