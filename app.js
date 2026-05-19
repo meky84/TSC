@@ -1,7 +1,19 @@
-/* app.js - Core logic for StreamingCommunity TV app */
-
 const API_URL = '/proxy/it/archive'; // Use proxy endpoint
-const PROXY_URL = 'https://tsc-6qr9.onrender.com'; // Base URL of the Python proxy server
+
+// Dynamically determine the proxy server URL.
+// If loaded via http/https, use the current domain. If loaded via file://, fallback to localhost.
+const PROXY_URL = window.location.protocol.startsWith('http') 
+  ? window.location.origin 
+  : 'http://localhost:8000';
+
+if (window.location.protocol === 'file:') {
+  const warnMsg = "ATTENZIONE: Stai aprendo l'applicazione direttamente come file locale (file://).\n\n" +
+                  "Per far funzionare correttamente lo streaming video ed evitare blocchi di sicurezza (CORS/CSP) da parte di Vixcloud,\n" +
+                  "avvia il server Python con 'python server.py' e apri questo indirizzo nel tuo browser:\n" +
+                  "http://localhost:8000";
+  console.warn(warnMsg);
+  alert(warnMsg);
+}
 
 let cdnUrl = 'https://cdn.streamingcommunityz.associates'; // Will load dynamically from proxy
 let baseSite = 'https://streamingcommunityz.associates'; // Will load dynamically from proxy
