@@ -1,8 +1,23 @@
 /* app.js - Core logic for StreamingCommunity TV app */
 
-// Configuration
 const API_URL = '/proxy/it/archive'; // Use proxy endpoint
 const PROXY_URL = 'https://tsc-6qr9.onrender.com'; // Base URL of the Python proxy server
+
+let cdnUrl = 'https://cdn.streamingcommunityz.associates'; // Will load dynamically from proxy
+
+// Fetch dynamic config from proxy
+async function loadProxyConfig() {
+  try {
+    const response = await fetch(`${PROXY_URL}/proxy-config`);
+    const config = await response.json();
+    if (config && config.cdn_site) {
+      cdnUrl = config.cdn_site;
+      console.log("Loaded dynamic CDN URL:", cdnUrl);
+    }
+  } catch (err) {
+    console.warn("Could not load dynamic config from proxy, using fallback:", err);
+  }
+}
 
 // Global App State
 let currentView = 'gallery'; // 'gallery', 'details', 'player'
@@ -78,7 +93,7 @@ function createItem(item) {
   const img = document.createElement('img');
   const imgObj = item.images.find(i => i.type === 'poster') || item.images.find(i => i.type === 'cover');
   if (imgObj) {
-    img.src = imgObj.original_url || `${PROXY_URL}/cdn/images/${imgObj.filename}`;
+    img.src = imgObj.original_url || `${cdnUrl}/images/${imgObj.filename}`;
   } else {
     img.src = '';
   }
@@ -265,11 +280,11 @@ async function loadDetailsData(item) {
     
     // Backdrop Image
     const bgImg = titleObj.images.find(i => i.type === 'background') || titleObj.images.find(i => i.type === 'cover');
-    const bgUrl = bgImg ? (bgImg.original_url || `${PROXY_URL}/cdn/images/${bgImg.filename}`) : '';
+    const bgUrl = bgImg ? (bgImg.original_url || `${cdnUrl}/images/${bgImg.filename}`) : '';
     
     // Logo Image
     const logoImg = titleObj.images.find(i => i.type === 'logo');
-    const logoUrl = logoImg ? (logoImg.original_url || `${PROXY_URL}/cdn/images/${logoImg.filename}`) : '';
+    const logoUrl = logoImg ? (logoImg.original_url || `${cdnUrl}/images/${logoImg.filename}`) : '';
     
     // Initialize seasons indexes
     if (titleObj.type === 'tv') {
@@ -928,6 +943,7 @@ window.addEventListener('load', async () => {
       }
     });
     
+    await loadProxyConfig();
     await renderGallery();
     bindRemote();
   } catch (err) {

@@ -66,8 +66,21 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        # --- Info di Configurazione (restituisce BASE_SITE e CDN_SITE) ---
+        if self.path == "/proxy-config":
+            self.send_response(200)
+            self._cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            config_data = {
+                "base_site": BASE_SITE,
+                "cdn_site": CDN_SITE
+            }
+            self.wfile.write(json.dumps(config_data).encode("utf-8"))
+            return
+
         # --- Proxy verso il sito principale ---
-        if self.path.startswith("/proxy/"):
+        elif self.path.startswith("/proxy/"):
             target_path = self.path[len("/proxy"):]   # /it/archive, /it/search?q=..., ecc.
             self._proxy_request(BASE_SITE + target_path)
 
