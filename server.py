@@ -161,13 +161,23 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
         ctx.check_hostname = False
         ctx.verify_mode   = ssl.CERT_NONE
 
-        req = urllib.request.Request(url, headers={
-            "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                               "AppleWebKit/537.36 (KHTML, like Gecko) "
-                               "Chrome/124.0.0.0 Safari/537.36",
+        headers = {
+            "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept":          "*/*",
             "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
-        })
+        }
+
+        # Copia gli header Range ed altri essenziali per lo streaming video
+        for h in ["Range", "If-Range", "Accept-Encoding"]:
+            if h in self.headers:
+                headers[h] = self.headers[h]
+
+        # Configura Referer e Origin autorizzati per bypassare i controlli WAF/Cloudflare
+        if "vixcloud.co" in url or "vix-content.net" in url or "streamingcommunity" in url:
+            headers["Referer"] = "https://streamingcommunityz.associates/"
+            headers["Origin"] = "https://streamingcommunityz.associates"
+
+        req = urllib.request.Request(url, headers=headers)
 
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
@@ -217,9 +227,17 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                     except Exception as e:
                         log_debug(f"[ERROR] Exception in rewrite: {type(e)} {e}")
 
-                self.send_response(200)
-                self.send_header("Content-Type",   content_type)
+                self.send_response(resp.status)
+                if content_type:
+                    self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
+                
+                # Copia intestazioni per lo streaming e range requests
+                for h in ["Content-Range", "Accept-Ranges", "Content-Encoding"]:
+                    val = resp.headers.get(h)
+                    if val is not None:
+                        self.send_header(h, val)
+
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Expires", "0")
