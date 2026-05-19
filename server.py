@@ -161,6 +161,15 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         text = text.replace(r"https:\/\/vixcloud.co", fr"{proxy_base}\/vixcloud")
                         text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
                         text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base.replace('/', r'\/')}\/vixcontent\/\1", text)
+                        
+                        # Rimuovi script pubblicitari e anti-debugger da Vixcloud
+                        if "text/html" in content_type:
+                            text = re.sub(r'<script[^>]*sechw\.com[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+                            text = re.sub(r'<script[^>]*>[\s\S]*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            # Previene i redirect javascript forzati sostituendo window.top e location.replace
+                            text = text.replace("window.top", "window.self")
+                            text = text.replace("top.location", "self.location")
+                            
                         body = text.encode("utf-8")
                     except Exception as e:
                         pass
