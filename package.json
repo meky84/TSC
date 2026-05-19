@@ -2,7 +2,7 @@
   "name": "meky106",
   "version": "1.0.6",
   "packageType": "app",
-  "appName": "STC106",
+  "appName": "STC",
   "description": "Client non ufficiale di StreamingCommunity per Smart TV Samsung (Tizen).",
   "appPath": "index.html",
   "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious"]
