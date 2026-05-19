@@ -177,6 +177,9 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type",   content_type)
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self._cors_headers()
                 self.end_headers()
                 if self.command != "HEAD":
