@@ -1,0 +1,936 @@
+/* app.js - Core logic for StreamingCommunity TV app */
+
+// Configuration
+const API_URL = '/proxy/it/archive'; // Use proxy endpoint
+const PROXY_URL = 'https://tsc-6qr9.onrender.com'; // Base URL of the Python proxy server
+
+// Global App State
+let currentView = 'gallery'; // 'gallery', 'details', 'player'
+let allTitles = [];
+let fetchedTitles = []; // Cache for current search or archive results
+let focusedGalleryIndex = 0;
+
+// Search & Filter Navigation State
+let galleryFocusArea = 'grid'; // 'search' or 'grid'
+let searchFocusedIndex = 0;    // 0: input, 1: filter-all, 2: filter-movie, 3: filter-tv
+let activeFilter = 'all';      // 'all', 'movie', 'tv'
+
+// Details Navigation State
+let detailsFocusArea = 'buttons'; // 'buttons', 'seasons', or 'episodes'
+let detailsButtonIndex = 0; // 0 for Play, 1 for Close
+let detailsEpisodeIndex = 0;
+let detailsSeasonIndex = 0;
+let activeSeasonNumber = 1;
+let loadedTitleData = null; // Stored metadata of the opened title
+
+// DOM Elements
+let galleryEl, detailsEl, playerEl;
+let searchInputEl, filterAllEl, filterMovieEl, filterTvEl;
+
+// Helper to fetch JSON data from the page's data-page attribute
+async function fetchData() {
+  const response = await fetch(`${PROXY_URL}${API_URL}`);
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/html");
+  const appDiv = doc.querySelector('[data-page]');
+  if (!appDiv) throw new Error('Data page JSON not found');
+  const dataAttr = appDiv.getAttribute('data-page');
+  const decoded = dataAttr.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const json = JSON.parse(decoded);
+  return json.props.titles || [];
+}
+
+// Fetch title details page
+async function fetchTitleDetails(id, slug) {
+  const response = await fetch(`${PROXY_URL}/proxy/it/titles/${id}-${slug}`);
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/html");
+  const appDiv = doc.querySelector('[data-page]');
+  if (!appDiv) throw new Error('Detail JSON not found');
+  const decoded = appDiv.getAttribute('data-page').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return JSON.parse(decoded).props;
+}
+
+// Fetch watch page to get embed URL
+async function fetchEmbedUrl(titleId, episodeId = null) {
+  let url = `${PROXY_URL}/proxy/it/watch/${titleId}`;
+  if (episodeId) {
+    url += `?e=${episodeId}`;
+  }
+  const response = await fetch(url);
+  const text = await response.text();
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/html");
+  const appDiv = doc.querySelector('[data-page]');
+  if (!appDiv) throw new Error('Watch JSON not found');
+  const decoded = appDiv.getAttribute('data-page').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  const props = JSON.parse(decoded).props;
+  return props.embedUrl;
+}
+
+// Build a gallery item element
+function createItem(item) {
+  const div = document.createElement('div');
+  div.className = 'card';
+  
+  const img = document.createElement('img');
+  const imgObj = item.images.find(i => i.type === 'poster') || item.images.find(i => i.type === 'cover');
+  if (imgObj) {
+    img.src = imgObj.original_url || `${PROXY_URL}/cdn/images/${imgObj.filename}`;
+  } else {
+    img.src = '';
+  }
+  img.alt = item.name;
+  
+  const info = document.createElement('div');
+  info.className = 'info';
+  const h3 = document.createElement('h3');
+  h3.textContent = item.name;
+  info.appendChild(h3);
+  
+  div.appendChild(img);
+  div.appendChild(info);
+  return div;
+}
+
+// Render the gallery with initial archive data
+async function renderGallery() {
+  galleryEl = document.getElementById('gallery');
+  try {
+    fetchedTitles = await fetchData();
+    applyFiltersAndRender();
+  } catch (err) {
+    console.error("Failed to load initial archive:", err);
+  }
+}
+
+// Perform search via proxy on Enter key
+async function performSearch() {
+  const query = searchInputEl.value.trim();
+  galleryEl.innerHTML = `<div style="color: #fff; padding: 20px; font-size: 20px; width: 100%;">Ricerca in corso...</div>`;
+  
+  if (query) {
+    try {
+      const response = await fetch(`${PROXY_URL}/proxy/it/search?q=${encodeURIComponent(query)}`);
+      const text = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, "text/html");
+      const appDiv = doc.querySelector('[data-page]');
+      if (appDiv) {
+        const decoded = appDiv.getAttribute('data-page').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+        const props = JSON.parse(decoded).props;
+        fetchedTitles = props.titles || [];
+      } else {
+        fetchedTitles = [];
+      }
+    } catch (err) {
+      console.error("Search error:", err);
+      fetchedTitles = [];
+    }
+  } else {
+    try {
+      fetchedTitles = await fetchData();
+    } catch (err) {
+      console.error("Failed to reload archive:", err);
+      fetchedTitles = [];
+    }
+  }
+  
+  applyFiltersAndRender();
+}
+
+// Apply current active category filters and render titles inside grid
+function applyFiltersAndRender() {
+  let filtered = fetchedTitles;
+  if (activeFilter === 'movie') {
+    filtered = fetchedTitles.filter(t => t.type === 'movie');
+  } else if (activeFilter === 'tv') {
+    filtered = fetchedTitles.filter(t => t.type === 'tv');
+  }
+  
+  allTitles = filtered;
+  focusedGalleryIndex = 0;
+  
+  galleryEl.innerHTML = '';
+  if (allTitles.length === 0) {
+    galleryEl.innerHTML = `<div style="color: #888; padding: 20px; font-size: 20px; width: 100%;">Nessun titolo trovato per questo filtro.</div>`;
+  } else {
+    allTitles.forEach(item => galleryEl.appendChild(createItem(item)));
+  }
+  
+  updateGalleryFocus();
+}
+
+// Select a filter category
+function selectFilter(filterName) {
+  activeFilter = filterName;
+  
+  filterAllEl.classList.toggle('active', activeFilter === 'all');
+  filterMovieEl.classList.toggle('active', activeFilter === 'movie');
+  filterTvEl.classList.toggle('active', activeFilter === 'tv');
+  
+  applyFiltersAndRender();
+}
+
+// Update DOM classes to reflect gallery focus
+function updateGalleryFocus() {
+  // Remove focus class from all elements in the main gallery/search area
+  const focusedElements = document.querySelectorAll('.search-container .focused, #search-bar .focused, .grid .card.focused, .filters .filter-btn.focused');
+  focusedElements.forEach(el => el.classList.remove('focused'));
+  
+  if (galleryFocusArea === 'search') {
+    if (searchFocusedIndex === 0) {
+      searchInputEl.classList.add('focused');
+    } else {
+      const btns = [filterAllEl, filterMovieEl, filterTvEl];
+      const targetBtn = btns[searchFocusedIndex - 1];
+      if (targetBtn) targetBtn.classList.add('focused');
+    }
+  } else if (galleryFocusArea === 'grid') {
+    const cards = galleryEl.querySelectorAll('.card');
+    if (cards.length > 0) {
+      if (focusedGalleryIndex >= cards.length) focusedGalleryIndex = cards.length - 1;
+      if (focusedGalleryIndex < 0) focusedGalleryIndex = 0;
+      
+      const activeCard = cards[focusedGalleryIndex];
+      activeCard.classList.add('focused');
+      
+      activeCard.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    }
+  }
+}
+
+// Helper to determine the number of grid columns dynamically
+function getGridColumns() {
+  const cards = document.querySelectorAll('.card');
+  if (cards.length <= 1) return 1;
+  const firstTop = cards[0].offsetTop;
+  for (let i = 1; i < cards.length; i++) {
+    if (cards[i].offsetTop > firstTop) {
+      return i;
+    }
+  }
+  return cards.length;
+}
+
+// Open details view for a title
+function showDetails(item) {
+  currentView = 'details';
+  detailsEl.style.display = 'flex';
+  
+  // Remove focus class from gallery items
+  const activeCard = galleryEl.querySelector('.card.focused');
+  if (activeCard) activeCard.classList.remove('focused');
+  
+  detailsEl.innerHTML = `
+    <div class="details-top">
+      <div class="details-overlay"></div>
+      <div class="details-content">
+        <h2 class="details-title">Caricamento...</h2>
+      </div>
+    </div>
+  `;
+  
+  // Reset navigation state inside details
+  detailsFocusArea = 'buttons';
+  detailsButtonIndex = 0;
+  detailsEpisodeIndex = 0;
+  detailsSeasonIndex = 0;
+  activeSeasonNumber = 1;
+  
+  loadDetailsData(item);
+}
+
+// Populate details view with fetched metadata
+async function loadDetailsData(item) {
+  try {
+    const props = await fetchTitleDetails(item.id, item.slug);
+    loadedTitleData = props;
+    
+    const titleObj = props.title || item;
+    const plotTrans = titleObj.translations.find(t => t.key === 'plot');
+    
+    // Decode HTML entities
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = plotTrans ? plotTrans.value : 'Trama non disponibile.';
+    const plotText = tempDiv.textContent;
+    
+    const releaseYear = titleObj.release_date ? new Date(titleObj.release_date).getFullYear() : (titleObj.release_date_it ? new Date(titleObj.release_date_it).getFullYear() : 'N/D');
+    
+    // Backdrop Image
+    const bgImg = titleObj.images.find(i => i.type === 'background') || titleObj.images.find(i => i.type === 'cover');
+    const bgUrl = bgImg ? (bgImg.original_url || `${PROXY_URL}/cdn/images/${bgImg.filename}`) : '';
+    
+    // Logo Image
+    const logoImg = titleObj.images.find(i => i.type === 'logo');
+    const logoUrl = logoImg ? (logoImg.original_url || `${PROXY_URL}/cdn/images/${logoImg.filename}`) : '';
+    
+    // Initialize seasons indexes
+    if (titleObj.type === 'tv') {
+      activeSeasonNumber = props.loadedSeason ? props.loadedSeason.number : 1;
+      const seasons = titleObj.seasons || [];
+      const sIdx = seasons.findIndex(s => s.number === activeSeasonNumber);
+      detailsSeasonIndex = sIdx >= 0 ? sIdx : 0;
+    }
+    
+    let buttonsHtml = '';
+    if (titleObj.type === 'movie') {
+      buttonsHtml = `
+        <button class="btn btn-primary btn-play focused">Riproduci</button>
+        <button class="btn btn-close">Chiudi</button>
+      `;
+    } else {
+      buttonsHtml = `
+        <button class="btn btn-primary btn-play focused">Riproduci S${activeSeasonNumber}:E1</button>
+        <button class="btn btn-close">Chiudi</button>
+      `;
+    }
+    
+    let bottomHtml = '';
+    if (titleObj.type === 'tv') {
+      const seasons = titleObj.seasons || [];
+      let seasonsButtonsHtml = '';
+      seasons.forEach((s, idx) => {
+        const isCurrent = s.number === activeSeasonNumber;
+        seasonsButtonsHtml += `
+          <button class="season-btn ${isCurrent ? 'active' : ''}" data-number="${s.number}" data-index="${idx}">
+            Stagione ${s.number}
+          </button>
+        `;
+      });
+      
+      const episodes = props.loadedSeason ? (props.loadedSeason.episodes || []) : [];
+      let episodesListHtml = '';
+        episodes.forEach((ep, idx) => {
+          episodesListHtml += `
+            <div class="episode-card" data-index="${idx}" data-id="${ep.id}">
+              <div class="episode-number">Ep. ${ep.number}</div>
+              <div class="episode-name">${ep.name || 'Senza nome'}</div>
+            </div>
+          `;
+        });
+      
+      bottomHtml = `
+        <div class="details-bottom">
+          <div class="seasons-list-row">
+            ${seasonsButtonsHtml}
+          </div>
+          <div class="episodes-list">
+            ${episodesListHtml || '<div style="color:#aaa; padding:10px;">Nessun episodio caricato</div>'}
+          </div>
+        </div>
+      `;
+    }
+    
+    detailsEl.innerHTML = `
+      <div class="details-top">
+        ${bgUrl ? `<img class="details-backdrop" src="${bgUrl}" alt="backdrop" />` : ''}
+        <div class="details-overlay"></div>
+        <div class="details-content">
+          ${logoUrl ? `<img class="details-logo" src="${logoUrl}" alt="logo" />` : `<h2 class="details-title">${titleObj.name}</h2>`}
+          <div class="details-meta">
+            <span class="rating">★ ${titleObj.score || '0.0'}</span>
+            <span class="year">${releaseYear}</span>
+            <span class="badge">${titleObj.quality || 'HD'}</span>
+            ${titleObj.type === 'tv' ? `<span class="badge">${titleObj.seasons_count} Stagioni</span>` : ''}
+          </div>
+          <p class="details-plot">${plotText}</p>
+          <div class="details-buttons">
+            ${buttonsHtml}
+          </div>
+        </div>
+      </div>
+      ${bottomHtml}
+    `;
+    
+    updateDetailsFocus();
+    
+  } catch (err) {
+    console.error("Failed to load details:", err);
+    detailsEl.innerHTML = `
+      <div class="details-top">
+        <div class="details-overlay"></div>
+        <div class="details-content">
+          <h2 class="details-title">Errore</h2>
+          <p>Impossibile caricare i dettagli di questo titolo.</p>
+          <div class="details-buttons">
+            <button class="btn btn-close focused">Chiudi</button>
+          </div>
+        </div>
+      </div>
+    `;
+    updateDetailsFocus();
+  }
+}
+
+// Fetch episodes of a specific season dynamically and rerender the bottom UI
+async function changeSeason(seasonNumber) {
+  if (!loadedTitleData || !loadedTitleData.title) return;
+  
+  const titleObj = loadedTitleData.title;
+  activeSeasonNumber = seasonNumber;
+  
+  // Show loading indicator in episodes list
+  const episodesListEl = detailsEl.querySelector('.episodes-list');
+  if (episodesListEl) {
+    episodesListEl.innerHTML = `<div style="color: #fff; padding: 10px; font-size: 14px;">Caricamento episodi...</div>`;
+  }
+  
+  // Update Play button label text to reflect selected season
+  const playBtn = detailsEl.querySelector('.details-buttons .btn-play');
+  if (playBtn) {
+    playBtn.textContent = `Riproduci S${activeSeasonNumber}:E1`;
+  }
+  
+  try {
+    const response = await fetch(`${PROXY_URL}/proxy/it/titles/${titleObj.id}-${titleObj.slug}/season-${seasonNumber}`);
+    const text = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/html");
+    const appDiv = doc.querySelector('[data-page]');
+    if (!appDiv) throw new Error('Data page JSON not found');
+    const decoded = appDiv.getAttribute('data-page').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    const newProps = JSON.parse(decoded).props;
+    
+    // Update loadedTitleData
+    loadedTitleData = newProps;
+    
+    // Rerender the bottom section!
+    const bottomContainer = detailsEl.querySelector('.details-bottom');
+    if (bottomContainer) {
+      const seasons = titleObj.seasons || [];
+      let seasonsButtonsHtml = '';
+      seasons.forEach((s, idx) => {
+        const isCurrent = s.number === activeSeasonNumber;
+        seasonsButtonsHtml += `
+          <button class="season-btn ${isCurrent ? 'active' : ''}" data-number="${s.number}" data-index="${idx}">
+            Stagione ${s.number}
+          </button>
+        `;
+      });
+      
+      const episodes = newProps.loadedSeason ? (newProps.loadedSeason.episodes || []) : [];
+      let episodesListHtml = '';
+      episodes.forEach((ep, idx) => {
+        episodesListHtml += `
+          <div class="episode-card" data-index="${idx}" data-id="${ep.id}">
+            <div class="episode-number">Ep. ${ep.number}</div>
+            <div class="episode-name">${ep.name || 'Senza nome'}</div>
+          </div>
+        `;
+      });
+      
+      bottomContainer.innerHTML = `
+        <div class="seasons-list-row">
+          ${seasonsButtonsHtml}
+        </div>
+        <div class="episodes-list">
+          ${episodesListHtml || '<div style="color:#aaa; padding:10px;">Nessun episodio caricato</div>'}
+        </div>
+      `;
+    }
+    
+    updateDetailsFocus();
+    
+  } catch (err) {
+    console.error("Failed to load season:", err);
+    if (episodesListEl) {
+      episodesListEl.innerHTML = `<div style="color: #ff5555; padding: 10px; font-size: 14px;">Errore nel caricamento degli episodi.</div>`;
+    }
+  }
+}
+
+// Update DOM classes to reflect the currently focused element in details view
+function updateDetailsFocus() {
+  const focusedElements = detailsEl.querySelectorAll('.focused');
+  focusedElements.forEach(el => el.classList.remove('focused'));
+  
+  if (detailsFocusArea === 'buttons') {
+    const buttons = detailsEl.querySelectorAll('.details-buttons .btn');
+    if (buttons.length > 0) {
+      if (detailsButtonIndex >= buttons.length) detailsButtonIndex = buttons.length - 1;
+      if (detailsButtonIndex < 0) detailsButtonIndex = 0;
+      buttons[detailsButtonIndex].classList.add('focused');
+    }
+  } else if (detailsFocusArea === 'seasons') {
+    const seasonBtns = detailsEl.querySelectorAll('.seasons-list-row .season-btn');
+    if (seasonBtns.length > 0) {
+      if (detailsSeasonIndex >= seasonBtns.length) detailsSeasonIndex = seasonBtns.length - 1;
+      if (detailsSeasonIndex < 0) detailsSeasonIndex = 0;
+      
+      const activeBtn = seasonBtns[detailsSeasonIndex];
+      activeBtn.classList.add('focused');
+      
+      activeBtn.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    }
+  } else if (detailsFocusArea === 'episodes') {
+    const episodes = detailsEl.querySelectorAll('.episodes-list .episode-card');
+    if (episodes.length > 0) {
+      if (detailsEpisodeIndex >= episodes.length) detailsEpisodeIndex = episodes.length - 1;
+      if (detailsEpisodeIndex < 0) detailsEpisodeIndex = 0;
+      
+      const activeCard = episodes[detailsEpisodeIndex];
+      activeCard.classList.add('focused');
+      
+      activeCard.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    }
+  }
+}
+
+// Get the video element from the outermost or innermost same-origin iframe
+function getPlayerVideo() {
+  const iframe = document.getElementById('player-iframe');
+  if (!iframe) return null;
+  try {
+    const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
+    if (!outerDoc) return null;
+    const innerIframe = outerDoc.querySelector('iframe');
+    if (innerIframe) {
+      const innerDoc = innerIframe.contentDocument || innerIframe.contentWindow.document;
+      if (innerDoc) {
+        return innerDoc.querySelector('video');
+      }
+    }
+    return outerDoc.querySelector('video');
+  } catch (err) {
+    return null;
+  }
+}
+
+// Automatically play the video inside the iframe and block popups using same-origin injection
+function setupPlayerIframe(iframe) {
+  let attempts = 0;
+  const maxAttempts = 100; // Poll for 20 seconds
+  
+  // Continuously override window.open inside BOTH the outer and inner iframe to block popups
+  const popupBlockerInterval = setInterval(() => {
+    try {
+      // 1. Block on outer iframe
+      const outerWin = iframe.contentWindow;
+      if (outerWin) {
+        outerWin.open = function() { return null; };
+        if (outerWin.parent) outerWin.parent.open = function() { return null; };
+      }
+      
+      // 2. Block on inner Vixcloud iframe (if present)
+      const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (outerDoc) {
+        const innerIframe = outerDoc.querySelector('iframe');
+        if (innerIframe) {
+          const innerWin = innerIframe.contentWindow;
+          if (innerWin) {
+            innerWin.open = function() { return null; };
+            if (innerWin.parent) innerWin.parent.open = function() { return null; };
+          }
+        }
+      }
+    } catch (err) {}
+  }, 10); // Run at 100Hz to catch dynamic scripts
+  
+  // Autoplay, click interceptor, keydown forwarding, and play trigger
+  const autoplayInterval = setInterval(() => {
+    attempts++;
+    if (attempts > maxAttempts) {
+      clearInterval(autoplayInterval);
+      clearInterval(popupBlockerInterval);
+      return;
+    }
+    
+    try {
+      const outerDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (!outerDoc) return;
+      
+      const innerIframe = outerDoc.querySelector('iframe');
+      if (!innerIframe) return;
+      
+      const innerDoc = innerIframe.contentDocument || innerIframe.contentWindow.document;
+      if (!innerDoc) return;
+      
+      // A. Intercept clicks inside inner iframe to block popup triggers
+      if (!innerDoc._clickIntercepted) {
+        innerDoc._clickIntercepted = true;
+        innerDoc.addEventListener('click', e => {
+          const target = e.target.closest('a');
+          if (target && target.href) {
+            if (!target.href.includes('localhost') && !target.href.includes('streamingcommunity')) {
+              console.log("Blocked ad link click inside inner iframe:", target.href);
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }
+        }, true);
+      }
+      
+      // B. Forward keys from inner iframe to the main app handler (crucial when iframe gets focus!)
+      if (!innerDoc._keydownBound) {
+        innerDoc._keydownBound = true;
+        innerDoc.addEventListener('keydown', e => {
+          console.log("Keydown forwarded from inner iframe:", e.key);
+          handlePlayerKeys(e.key);
+          if (isBackKey(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      }
+      
+      // C. Forward keys from outer iframe as well
+      if (!outerDoc._keydownBound) {
+        outerDoc._keydownBound = true;
+        outerDoc.addEventListener('keydown', e => {
+          console.log("Keydown forwarded from outer iframe:", e.key);
+          handlePlayerKeys(e.key);
+          if (isBackKey(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      }
+      
+      // D. Try playing the HTML5 video element directly
+      const video = innerDoc.querySelector('video');
+      if (video) {
+        video.muted = false;
+        video.play().then(() => {
+          console.log("Video played successfully inside Vixcloud iframe");
+          clearInterval(autoplayInterval);
+          clearInterval(popupBlockerInterval);
+        }).catch(err => {
+          // Keep trying or fallback to click
+        });
+      }
+      
+      // E. Click the Vixcloud or Plyr play button overlay if it exists
+      const playButtons = innerDoc.querySelectorAll('.vjs-big-play-button, .plyr__control--large, .jw-display-icon-container, button[aria-label="Play"], .play-button, [class*="play"]');
+      for (const btn of playButtons) {
+        if (btn.offsetWidth > 0 || btn.offsetHeight > 0) {
+          console.log("Clicking Vixcloud play button overlay");
+          btn.click();
+          clearInterval(autoplayInterval);
+          clearInterval(popupBlockerInterval);
+          break;
+        }
+      }
+    } catch (err) {
+      // Ignore cross-frame errors if loaded incompletely
+    }
+  }, 200);
+}
+
+// Launch Video Player using local iframe proxy without sandbox crashes
+async function playTitle(titleId, episodeId = null) {
+  try {
+    currentView = 'player';
+    playerEl.style.display = 'block';
+    playerEl.innerHTML = `<div style="color: #fff; padding: 20px; font-size: 24px; text-align: center;">Caricamento player in corso...</div>`;
+    
+    const embedUrl = await fetchEmbedUrl(titleId, episodeId);
+    if (!embedUrl) throw new Error("Embed URL not found");
+    
+    // Redirect through local proxy to bypass CORS/sandboxing issues
+    const localUrl = embedUrl.replace('https://streamingcommunityz.associates', PROXY_URL + '/proxy');
+    
+    // Crucial: Removed HTML5 sandbox attribute to prevent player anti-sandbox scripts from crashing.
+    // Instead, we use setupPlayerIframe same-origin overrides to block popups.
+    playerEl.innerHTML = `<iframe id="player-iframe" src="${localUrl}" allowfullscreen></iframe>`;
+    
+    const iframe = document.getElementById('player-iframe');
+    setupPlayerIframe(iframe);
+  } catch (err) {
+    console.error(err);
+    alert("Impossibile caricare il player: " + err.message);
+    stopPlayer();
+  }
+}
+
+// Close player and return to details
+function stopPlayer() {
+  currentView = 'details';
+  playerEl.style.display = 'none';
+  playerEl.innerHTML = ''; // Destroys iframe to stop sound and video
+  updateDetailsFocus();
+}
+
+// Keyboard and Remote Control key down mapping
+function isBackKey(key) {
+  return key === 'Backspace' || key === 'Escape' || key === 'ArrowBack' || key === 'Back' || key === 'BrowserBack' || key === '\\' || key === '/';
+}
+
+function handleGalleryKeys(key) {
+  if (galleryFocusArea === 'search') {
+    if (key === 'ArrowRight') {
+      searchFocusedIndex = (searchFocusedIndex + 1) % 4;
+      updateGalleryFocus();
+    } else if (key === 'ArrowLeft') {
+      searchFocusedIndex = (searchFocusedIndex - 1 + 4) % 4;
+      updateGalleryFocus();
+    } else if (key === 'ArrowDown') {
+      const cards = galleryEl.querySelectorAll('.card');
+      if (cards.length > 0) {
+        galleryFocusArea = 'grid';
+        focusedGalleryIndex = 0;
+        updateGalleryFocus();
+      }
+    } else if (key === 'Enter') {
+      if (searchFocusedIndex === 0) {
+        searchInputEl.focus();
+      } else if (searchFocusedIndex === 1) {
+        selectFilter('all');
+      } else if (searchFocusedIndex === 2) {
+        selectFilter('movie');
+      } else if (searchFocusedIndex === 3) {
+        selectFilter('tv');
+      }
+    }
+    return;
+  }
+  
+  const cards = galleryEl.querySelectorAll('.card');
+  if (!cards.length) return;
+  
+  const cols = getGridColumns();
+  let nextIndex = focusedGalleryIndex;
+  
+  if (key === 'ArrowRight') {
+    nextIndex = (focusedGalleryIndex + 1) % cards.length;
+  } else if (key === 'ArrowLeft') {
+    nextIndex = (focusedGalleryIndex - 1 + cards.length) % cards.length;
+  } else if (key === 'ArrowDown') {
+    if (focusedGalleryIndex + cols < cards.length) {
+      nextIndex = focusedGalleryIndex + cols;
+    }
+  } else if (key === 'ArrowUp') {
+    if (focusedGalleryIndex - cols >= 0) {
+      nextIndex = focusedGalleryIndex - cols;
+    } else {
+      galleryFocusArea = 'search';
+      searchFocusedIndex = 0; // Default to input
+      updateGalleryFocus();
+      return;
+    }
+  } else if (key === 'Enter') {
+    const activeItem = allTitles[focusedGalleryIndex];
+    if (activeItem) {
+      showDetails(activeItem);
+    }
+    return;
+  }
+  
+  if (nextIndex !== focusedGalleryIndex) {
+    cards[focusedGalleryIndex].classList.remove('focused');
+    focusedGalleryIndex = nextIndex;
+    cards[focusedGalleryIndex].classList.add('focused');
+    cards[focusedGalleryIndex].scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest'
+    });
+  }
+}
+
+function handleDetailsKeys(key) {
+  if (isBackKey(key)) {
+    currentView = 'gallery';
+    detailsEl.style.display = 'none';
+    loadedTitleData = null;
+    updateGalleryFocus();
+    return;
+  }
+  
+  if (detailsFocusArea === 'buttons') {
+    if (key === 'ArrowRight') {
+      detailsButtonIndex = 1; // Chiudi button
+      updateDetailsFocus();
+    } else if (key === 'ArrowLeft') {
+      detailsButtonIndex = 0; // Play button
+      updateDetailsFocus();
+    } else if (key === 'ArrowDown') {
+      const titleObj = loadedTitleData ? loadedTitleData.title : null;
+      if (titleObj && titleObj.type === 'tv') {
+        const seasonBtns = detailsEl.querySelectorAll('.seasons-list-row .season-btn');
+        if (seasonBtns.length > 0) {
+          detailsFocusArea = 'seasons';
+          updateDetailsFocus();
+        }
+      }
+    } else if (key === 'Enter') {
+      if (detailsButtonIndex === 0) {
+        const titleObj = loadedTitleData.title;
+        if (titleObj.type === 'movie') {
+          playTitle(titleObj.id);
+        } else {
+          const episodes = (loadedTitleData.loadedSeason && loadedTitleData.loadedSeason.episodes) || [];
+          if (episodes.length > 0) {
+            playTitle(titleObj.id, episodes[0].id);
+          } else {
+            alert("Nessun episodio disponibile.");
+          }
+        }
+      } else {
+        // Close details view
+        handleDetailsKeys('Escape');
+      }
+    }
+  } else if (detailsFocusArea === 'seasons') {
+    const seasonBtns = detailsEl.querySelectorAll('.seasons-list-row .season-btn');
+    if (key === 'ArrowRight') {
+      if (detailsSeasonIndex + 1 < seasonBtns.length) {
+        detailsSeasonIndex++;
+        updateDetailsFocus();
+      }
+    } else if (key === 'ArrowLeft') {
+      if (detailsSeasonIndex - 1 >= 0) {
+        detailsSeasonIndex--;
+        updateDetailsFocus();
+      }
+    } else if (key === 'ArrowUp') {
+      detailsFocusArea = 'buttons';
+      updateDetailsFocus();
+    } else if (key === 'ArrowDown') {
+      const episodes = detailsEl.querySelectorAll('.episodes-list .episode-card');
+      if (episodes.length > 0) {
+        detailsFocusArea = 'episodes';
+        detailsEpisodeIndex = 0;
+        updateDetailsFocus();
+      }
+    } else if (key === 'Enter') {
+      const activeBtn = seasonBtns[detailsSeasonIndex];
+      if (activeBtn) {
+        const sNum = parseInt(activeBtn.getAttribute('data-number'));
+        if (sNum && sNum !== activeSeasonNumber) {
+          changeSeason(sNum);
+        }
+      }
+    }
+  } else if (detailsFocusArea === 'episodes') {
+    const episodes = detailsEl.querySelectorAll('.episodes-list .episode-card');
+    if (key === 'ArrowRight') {
+      if (detailsEpisodeIndex + 1 < episodes.length) {
+        detailsEpisodeIndex++;
+        updateDetailsFocus();
+      }
+    } else if (key === 'ArrowLeft') {
+      if (detailsEpisodeIndex - 1 >= 0) {
+        detailsEpisodeIndex--;
+        updateDetailsFocus();
+      }
+    } else if (key === 'ArrowUp') {
+      const titleObj = loadedTitleData ? loadedTitleData.title : null;
+      if (titleObj && titleObj.type === 'tv') {
+        detailsFocusArea = 'seasons';
+      } else {
+        detailsFocusArea = 'buttons';
+      }
+      updateDetailsFocus();
+    } else if (key === 'Enter') {
+      const titleObj = loadedTitleData.title;
+      const episodesList = (loadedTitleData.loadedSeason && loadedTitleData.loadedSeason.episodes) || [];
+      const activeEp = episodesList[detailsEpisodeIndex];
+      if (activeEp) {
+        playTitle(titleObj.id, activeEp.id);
+      }
+    }
+  }
+}
+
+function handlePlayerKeys(key) {
+  if (isBackKey(key)) {
+    stopPlayer();
+    return;
+  }
+  
+  const video = getPlayerVideo();
+  if (!video) return;
+  
+  // Pause/Play controls with Enter or Space
+  if (key === 'Enter' || key === ' ') {
+    try {
+      if (video.paused) {
+        video.play();
+      } else {
+        video.pause();
+      }
+    } catch (err) {}
+  }
+  
+  // Seek controls with Left/Right Arrows
+  if (key === 'ArrowRight') {
+    try {
+      video.currentTime += 10; // Seek forward 10s
+    } catch (err) {}
+  } else if (key === 'ArrowLeft') {
+    try {
+      video.currentTime -= 10; // Seek backward 10s
+    } catch (err) {}
+  }
+}
+
+// Bind overall remote control events
+function bindRemote() {
+  updateGalleryFocus();
+  
+  document.addEventListener('keydown', e => {
+    // Intercept Back key to prevent default TV actions (like exiting app) if we are in details/player views
+    if (currentView !== 'gallery' && isBackKey(e.key)) {
+      e.preventDefault();
+    }
+    
+    if (currentView === 'gallery') {
+      // If the input has focus, let the browser capture key events (except Escape/Backspace which exits focus)
+      if (document.activeElement === searchInputEl) {
+        if (e.key === 'Escape' || e.key === 'Back' || e.key === 'BrowserBack' || e.key === 'ArrowBack') {
+          searchInputEl.blur();
+          updateGalleryFocus();
+          e.preventDefault();
+        }
+        return; // Don't intercept normal typing keys
+      }
+      handleGalleryKeys(e.key);
+    } else if (currentView === 'details') {
+      handleDetailsKeys(e.key);
+    } else if (currentView === 'player') {
+      handlePlayerKeys(e.key);
+    }
+  });
+}
+
+window.addEventListener('load', async () => {
+  try {
+    detailsEl = document.getElementById('details-view');
+    playerEl = document.getElementById('player-view');
+    
+    // Bind search and filter DOM elements
+    searchInputEl = document.getElementById('search-input');
+    filterAllEl = document.getElementById('filter-all');
+    filterMovieEl = document.getElementById('filter-movie');
+    filterTvEl = document.getElementById('filter-tv');
+    
+    // Bind Enter key listener inside search input
+    searchInputEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        performSearch();
+        searchInputEl.blur();
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+    
+    await renderGallery();
+    bindRemote();
+  } catch (err) {
+    console.error(err);
+  }
+});

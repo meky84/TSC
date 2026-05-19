@@ -1,0 +1,8 @@
+{
+  "name": "stc100",
+  "version": "1.0.0",
+  "packageType": "app",
+  "appName": "StreamCom",
+  "appPath": "index.html",
+  "keys": ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Return", "Back"]
+}

@@ -1,0 +1,432 @@
+/* style.css - Premium dark theme for StreamCom TV app */
+
+:root {
+  --bg-color: #0d0d0d;            /* deep dark background */
+  --primary-color: #1db954;        /* accent (green) */
+  --text-color: #e0e0e0;          /* light gray text */
+  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-radius: 12px;
+  --transition: 0.2s ease;
+  --grid-gap: 20px;
+  --scale: 2; /* 4K scaling default */
+}
+
+/* Global reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Search bar container */
+.search-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 calc(30px * var(--scale));
+  background: rgba(20, 20, 20, 0.95);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.05);
+  height: calc(65px * var(--scale));
+  flex-shrink: 0;
+}
+
+#search-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  border-radius: calc(6px * var(--scale));
+  color: #fff;
+  font-size: calc(14px * var(--scale));
+  padding: calc(6px * var(--scale)) calc(12px * var(--scale));
+  width: calc(250px * var(--scale));
+  outline: none;
+  transition: var(--transition);
+}
+
+#search-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+#search-input.focused {
+  border-color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 calc(8px * var(--scale)) rgba(29, 185, 84, 0.4);
+}
+
+/* Filters styling */
+.filters {
+  display: flex;
+}
+
+.filter-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: calc(6px * var(--scale));
+  color: var(--text-color);
+  font-size: calc(12px * var(--scale));
+  padding: calc(6px * var(--scale)) calc(12px * var(--scale));
+  margin-left: calc(10px * var(--scale));
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition);
+}
+
+.filter-btn.active {
+  background: var(--primary-color);
+  color: #000;
+  font-weight: bold;
+}
+
+.filter-btn.focused {
+  border-color: #fff;
+  box-shadow: 0 0 calc(8px * var(--scale)) rgba(255, 255, 255, 0.3);
+}
+
+/* Flexbox gallery - Compatible with Tizen 4.0 (Chromium 56) */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: calc(15px * var(--scale));
+  overflow-y: auto;
+  flex: 1;
+  align-content: flex-start;
+}
+
+/* TV Card - Fixed width and height with margin spacing for Tizen 4.0 support */
+.card {
+  width: calc(130px * var(--scale)); /* Explicit width: 260px on 4K, 130px on HD */
+  height: calc(195px * var(--scale)); /* Explicit height: 390px on 4K, 195px on HD (2:3 ratio) */
+  margin: calc(10px * var(--scale)); /* Spacing between cards (replaces CSS grid-gap) */
+  background: var(--card-bg);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  position: relative;
+  transition: transform var(--transition), box-shadow var(--transition);
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+}
+
+/* Focused state for remote control */
+.card.focused {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 5px var(--primary-color), 0 15px 30px rgba(0,0,0,0.7);
+  z-index: 10;
+}
+
+/* Cover image fills the entire card background */
+.card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #1a1a1a;
+}
+
+/* Elegant title overlay at the bottom */
+.card .info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: calc(15px * var(--scale)) calc(8px * var(--scale)) calc(8px * var(--scale));
+  background: linear-gradient(to top, rgba(0,0,0,0.98) 0%, rgba(0,0,0,0.8) 50%, rgba(0,0,0,0.3) 80%, rgba(0,0,0,0) 100%);
+  text-align: center;
+}
+
+.card .info h3 {
+  font-size: calc(11px * var(--scale));
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+}
+
+/* Custom TV-style scrollbar */
+.grid::-webkit-scrollbar {
+  width: 10px;
+}
+.grid::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.02);
+}
+.grid::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 5px;
+}
+
+@media (max-width: 1280px) {
+  :root { --scale: 1; }
+}
+
+/* Details Screen */
+.details-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-color);
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.details-top {
+  display: flex;
+  height: 65%;
+  position: relative;
+  width: 100%;
+}
+
+.details-backdrop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 65%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.details-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to right, #0d0d0d 35%, rgba(13,13,13,0.85) 55%, rgba(13,13,13,0) 100%);
+  z-index: 2;
+}
+
+.details-content {
+  position: relative;
+  z-index: 3;
+  width: 50%;
+  height: 100%;
+  padding: calc(20px * var(--scale)) calc(40px * var(--scale));
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.details-logo {
+  max-width: 80%;
+  max-height: calc(65px * var(--scale));
+  object-fit: contain;
+  margin-bottom: calc(12px * var(--scale));
+  align-self: flex-start;
+}
+
+.details-title {
+  font-size: calc(24px * var(--scale));
+  font-weight: 700;
+  margin-bottom: calc(8px * var(--scale));
+  color: #fff;
+}
+
+.details-meta {
+  display: flex;
+  gap: calc(12px * var(--scale));
+  font-size: calc(12px * var(--scale));
+  color: #aaa;
+  margin-bottom: calc(12px * var(--scale));
+  align-items: center;
+}
+
+.details-meta .rating {
+  color: var(--primary-color);
+  font-weight: bold;
+}
+
+.details-meta .badge {
+  background: rgba(255,255,255,0.1);
+  padding: calc(2px * var(--scale)) calc(6px * var(--scale));
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.details-plot {
+  font-size: calc(10.5px * var(--scale));
+  line-height: 1.45;
+  color: #ccc;
+  margin-bottom: calc(15px * var(--scale));
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.details-buttons {
+  display: flex;
+  gap: calc(12px * var(--scale));
+  margin: calc(-10px * var(--scale)) 0 calc(-10px * var(--scale)) calc(-10px * var(--scale));
+  padding: calc(10px * var(--scale));
+}
+
+.btn {
+  padding: calc(6px * var(--scale)) calc(16px * var(--scale));
+  font-size: calc(12px * var(--scale));
+  font-weight: bold;
+  border: 2px solid transparent;
+  border-radius: calc(5px * var(--scale));
+  cursor: pointer;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.btn-primary {
+  background: var(--primary-color);
+  color: #000;
+}
+
+.btn.focused {
+  transform: scale(1.08);
+  border-color: #fff;
+  box-shadow: 0 0 15px rgba(29, 185, 84, 0.5);
+  outline: none;
+}
+
+.details-bottom {
+  height: 35%;
+  padding: calc(10px * var(--scale)) calc(40px * var(--scale));
+  background: rgba(13, 13, 13, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+}
+
+.seasons-list-row {
+  display: flex;
+  overflow-x: auto;
+  margin: 0 calc(-40px * var(--scale)) calc(15px * var(--scale)) calc(-10px * var(--scale));
+  padding: calc(6px * var(--scale)) calc(10px * var(--scale));
+  flex-shrink: 0;
+}
+
+/* Hide horizontal scrollbar for seasons list but allow scrolling */
+.seasons-list-row::-webkit-scrollbar {
+  display: none;
+}
+
+.season-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: calc(4px * var(--scale));
+  color: #ccc;
+  font-size: calc(10.5px * var(--scale));
+  font-weight: 600;
+  padding: calc(4px * var(--scale)) calc(12px * var(--scale));
+  margin-right: calc(8px * var(--scale));
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.2s, background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+
+.season-btn.active {
+  background: var(--primary-color);
+  color: #000;
+  font-weight: bold;
+}
+
+.season-btn.focused {
+  border-color: #fff;
+  box-shadow: 0 0 calc(8px * var(--scale)) rgba(255, 255, 255, 0.3);
+  transform: scale(1.05);
+  outline: none;
+}
+
+.episodes-list {
+  display: flex;
+  overflow-x: auto;
+  gap: calc(12px * var(--scale));
+  margin: 0 calc(-40px * var(--scale)) 0 calc(-10px * var(--scale));
+  padding: calc(8px * var(--scale)) calc(10px * var(--scale));
+  flex-grow: 1;
+}
+
+.episode-card {
+  min-width: calc(180px * var(--scale));
+  max-width: calc(180px * var(--scale));
+  height: calc(32px * var(--scale));
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: calc(6px * var(--scale));
+  padding: 0 calc(10px * var(--scale));
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.2s, border-color 0.2s, background-color 0.2s;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.episode-card.focused {
+  transform: scale(1.05);
+  border-color: var(--primary-color);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.episode-number {
+  font-size: calc(11px * var(--scale));
+  color: var(--primary-color);
+  font-weight: bold;
+  margin-right: calc(8px * var(--scale));
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.episode-name {
+  font-size: calc(11px * var(--scale));
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Custom Scrollbars for Episodes and Gallery */
+.episodes-list::-webkit-scrollbar {
+  height: 6px;
+}
+.episodes-list::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.01);
+}
+.episodes-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+/* Player Screen */
+.player-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  z-index: 200;
+  display: none;
+}
+
+.player-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}

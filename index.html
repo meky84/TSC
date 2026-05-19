@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StreamCom TV</title>
+    <link rel="stylesheet" href="style.css?v=10.0" />
+</head>
+<body>
+    <div id="search-bar" class="search-container">
+        <input type="text" id="search-input" placeholder="Premere Invio per cercare..." />
+        <div class="filters">
+            <button id="filter-all" class="filter-btn active">Tutti</button>
+            <button id="filter-movie" class="filter-btn">Film</button>
+            <button id="filter-tv" class="filter-btn">Serie TV</button>
+        </div>
+    </div>
+    <main id="gallery" class="grid"></main>
+    <div id="details-view" class="details-container" style="display: none;"></div>
+    <div id="player-view" class="player-container" style="display: none;"></div>
+    <script src="app.js?v=10.0"></script>
+</body>
+</html>
