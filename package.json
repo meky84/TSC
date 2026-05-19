@@ -1,6 +1,6 @@
 {
   "name": "stc100",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "packageType": "app",
   "appName": "StreamCom",
   "appPath": "index.html",

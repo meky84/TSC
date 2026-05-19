@@ -1,10 +1,12 @@
 const API_URL = '/proxy/it/archive'; // Use proxy endpoint
 
 // Dynamically determine the proxy server URL.
-// If loaded via http/https, use the current domain. If loaded via file://, fallback to localhost.
-const PROXY_URL = window.location.protocol.startsWith('http') 
-  ? window.location.origin 
-  : 'http://localhost:8000';
+// If loaded via localhost:8000, use it. If on Render, use the origin. Otherwise, default to Render proxy URL.
+const PROXY_URL = (window.location.hostname === 'localhost' && window.location.port === '8000')
+  ? 'http://localhost:8000'
+  : (window.location.hostname.includes('onrender.com') 
+    ? window.location.origin 
+    : 'https://tsc-6qr9.onrender.com');
 
 if (window.location.protocol === 'file:') {
   const warnMsg = "ATTENZIONE: Stai aprendo l'applicazione direttamente come file locale (file://).\n\n" +
