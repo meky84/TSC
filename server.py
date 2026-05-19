@@ -16,6 +16,7 @@ import ssl
 import sys
 import os
 import json
+import re
 
 PORT = int(os.environ.get("PORT", 8000))
 CONFIG_FILE = "config.json"
@@ -214,7 +215,7 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                             
                         body = text.encode("utf-8")
                     except Exception as e:
-                        pass
+                        log_debug(f"[ERROR] Exception in rewrite: {type(e)} {e}")
 
                 self.send_response(200)
                 self.send_header("Content-Type",   content_type)
