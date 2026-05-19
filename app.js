@@ -610,13 +610,14 @@ async function playTitle(titleId, episodeId = null) {
     });
     
     const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Tizen');
+    const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
     
-    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${navigator.userAgent.includes('Tizen')}`);
+    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${isTizenPlayer}`);
     
-    if (isSafariPlayer && video.canPlayType('application/vnd.apple.mpegurl')) {
-      log(`Using Native Safari Player...`);
+    if ((isSafariPlayer || isTizenPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
+      log(`Using Native Player (Safari/Tizen)...`);
       video.src = streamUrl;
-      video.play().catch(e => log(`Play failed: ${e.message}`));
+      video.play().catch(e => log(`Play failed: ${e.name} - ${e.message}`));
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       log(`Using hls.js player (Version: ${Hls.version || 'unknown'})...`);
       const hls = new Hls({
