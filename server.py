@@ -60,10 +60,24 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
+    def send_error(self, code, message=None, explain=None):
+        try:
+            self.send_response(code)
+            self._cors_headers()
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            if self.command != "HEAD" and message:
+                self.wfile.write(str(message).encode("utf-8"))
+        except Exception:
+            pass
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors_headers()
         self.end_headers()
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_GET(self):
         # --- Info di Configurazione (restituisce BASE_SITE e CDN_SITE) ---
@@ -72,11 +86,12 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
             self._cors_headers()
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            config_data = {
-                "base_site": BASE_SITE,
-                "cdn_site": CDN_SITE
-            }
-            self.wfile.write(json.dumps(config_data).encode("utf-8"))
+            if self.command != "HEAD":
+                config_data = {
+                    "base_site": BASE_SITE,
+                    "cdn_site": CDN_SITE
+                }
+                self.wfile.write(json.dumps(config_data).encode("utf-8"))
             return
 
         # --- Proxy verso il sito principale ---
@@ -145,7 +160,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body)))
                 self._cors_headers()
                 self.end_headers()
-                self.wfile.write(body)
+                if self.command != "HEAD":
+                    self.wfile.write(body)
 
         except urllib.error.HTTPError as e:
             self.send_error(e.code, str(e))
