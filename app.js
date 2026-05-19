@@ -599,7 +599,10 @@ async function playTitle(titleId, episodeId = null) {
     const video = document.getElementById('native-player');
     
     // Attempt play
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    const isTizenPlayer = (window.tizen !== undefined || navigator.userAgent.includes('Tizen'));
+    const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome');
+    
+    if ((isTizenPlayer || isSafariPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari, Tizen, webOS)
       video.src = streamUrl;
       video.play().catch(e => console.log("Play failed: ", e));
@@ -617,6 +620,10 @@ async function playTitle(titleId, episodeId = null) {
       
       // Store hls instance on the player container to destroy it on close
       playerEl._hlsInstance = hls;
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // General native HLS fallback
+      video.src = streamUrl;
+      video.play().catch(e => console.log("Play failed: ", e));
     } else {
       throw new Error("Il tuo browser non supporta la riproduzione HLS.");
     }
