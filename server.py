@@ -162,6 +162,17 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
                         text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base.replace('/', r'\/')}\/vixcontent\/\1", text)
                         
+                        # Riscrivi anche il dominio di StreamingCommunity per convogliare gli asset statici (JS/CSS/fonts) nel proxy ed evitare errori CORS
+                        text = text.replace(BASE_SITE, f"{proxy_base}/proxy")
+                        escaped_base = BASE_SITE.replace("/", r"\/")
+                        escaped_proxy = f"{proxy_base}/proxy".replace("/", r"\/")
+                        text = text.replace(escaped_base, escaped_proxy)
+
+                        text = text.replace(CDN_SITE, f"{proxy_base}/cdn")
+                        escaped_cdn = CDN_SITE.replace("/", r"\/")
+                        escaped_proxy_cdn = f"{proxy_base}/cdn".replace("/", r"\/")
+                        text = text.replace(escaped_cdn, escaped_proxy_cdn)
+                        
                         # Rimuovi script pubblicitari e anti-debugger da Vixcloud
                         if "text/html" in content_type:
                             text = re.sub(r'<script[^>]*sechw\.com[^>]*>.*?</script>', '', text, flags=re.DOTALL)
