@@ -91,6 +91,9 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                     "base_site": BASE_SITE,
                     "cdn_site": CDN_SITE
                 }
+                json_bytes = json.dumps(config_data).encode("utf-8")
+                self.wfile.write(json_bytes)
+                self.wfile.flush()
             return
 
         # --- Proxy verso il sito principale ---
