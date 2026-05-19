@@ -564,8 +564,9 @@ async function extractStreamUrl(embedUrl) {
   const expires = expiresMatch[1];
   const playlistBaseUrl = urlMatch[1];
   
-  // 3. Construct stream URL
-  let streamUrl = `${playlistBaseUrl}?token=${token}&expires=${expires}&b=1`;
+  // 3. Construct stream URL (clean query params from playlistBaseUrl first to prevent double question marks)
+  const cleanPlaylistUrl = playlistBaseUrl.split('?')[0];
+  let streamUrl = `${cleanPlaylistUrl}?token=${token}&expires=${expires}&b=1`;
   console.log("Constructed playlist URL:", streamUrl);
   
   // Rewrite to proxy
@@ -645,7 +646,7 @@ function isBackKey(key, keyCode) {
   return key === 'Backspace' || key === 'Escape' || key === 'ArrowBack' || key === 'Back' || key === 'BrowserBack' || key === '\\' || key === '/' || keyCode === 10009 || key === 'XF86Backspace';
 }
 
-function handleGalleryKeys(key) {
+function handleGalleryKeys(key, keyCode, e) {
   if (galleryFocusArea === 'search') {
     if (key === 'ArrowRight') {
       searchFocusedIndex = (searchFocusedIndex + 1) % 4;
@@ -662,6 +663,10 @@ function handleGalleryKeys(key) {
       }
     } else if (key === 'Enter') {
       if (searchFocusedIndex === 0) {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         searchInputEl.focus();
       } else if (searchFocusedIndex === 1) {
         selectFilter('all');
@@ -915,7 +920,7 @@ function bindRemote() {
         return;
       }
       
-      handleGalleryKeys(e.key, e.keyCode);
+      handleGalleryKeys(e.key, e.keyCode, e);
     } else if (currentView === 'details') {
       handleDetailsKeys(e.key, e.keyCode);
     } else if (currentView === 'player') {
