@@ -159,6 +159,10 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         host = self.headers.get("Host", f"localhost:{PORT}")
                         proto = self.headers.get("X-Forwarded-Proto", "http" if "localhost" in host or "127.0.0.1" in host else "https")
                         proxy_base = f"{proto}://{host}"
+                        print(f"[DEBUG] Proxying: {url} | Content-Type: {content_type}")
+                        print(f"[DEBUG] proxy_base: {proxy_base}")
+                        print(f"[DEBUG] Before replace vixcloud count: {text.count('https://vixcloud.co')}")
+                        
                         text = text.replace("https://vixcloud.co", f"{proxy_base}/vixcloud")
                         text = text.replace(r"https:\/\/vixcloud.co", fr"{proxy_base}\/vixcloud")
                         text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
@@ -175,6 +179,9 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         escaped_cdn = CDN_SITE.replace("/", r"\/")
                         escaped_proxy_cdn = f"{proxy_base}/cdn".replace("/", r"\/")
                         text = text.replace(escaped_cdn, escaped_proxy_cdn)
+                        
+                        print(f"[DEBUG] After replace vixcloud count: {text.count('https://vixcloud.co')}")
+                        print(f"[DEBUG] After replace proxy/vixcloud count: {text.count(proxy_base + '/vixcloud')}")
                         
                         # Rimuovi script pubblicitari e anti-debugger da Vixcloud
                         if "text/html" in content_type:
