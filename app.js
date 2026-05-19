@@ -611,10 +611,45 @@ async function playTitle(titleId, episodeId = null) {
     
     const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Tizen');
     const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
+    const hasAVPlay = (typeof webapis !== 'undefined' && webapis.avplay);
     
-    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${isTizenPlayer}`);
+    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${isTizenPlayer}, AVPlay=${hasAVPlay}`);
     
-    if ((isSafariPlayer || isTizenPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
+    if (hasAVPlay) {
+      log(`Using Tizen AVPlay API...`);
+      playerEl.innerHTML += `<object id="av-player" type="application/avplayer" style="width: 100%; height: 100%; position: absolute; top:0; left:0; z-index: 10;"></object>`;
+      document.getElementById('debug-overlay').style.zIndex = "9999";
+      
+      try {
+        webapis.avplay.open(streamUrl);
+        webapis.avplay.setDisplayRect(0, 0, window.innerWidth, window.innerHeight);
+        
+        webapis.avplay.setListener({
+          onbufferingstart: function() { log("AVPlay: Buffering start"); },
+          onbufferingprogress: function(percent) { /* log("AVPlay: Buffering " + percent + "%"); */ },
+          onbufferingcomplete: function() { log("AVPlay: Buffering complete"); },
+          onerror: function(eventType) { log("AVPlay Error: " + eventType); },
+          onevent: function(eventType, eventData) { log("AVPlay Event: " + eventType + " " + (eventData || "")); },
+          onstreamcompleted: function() { log("AVPlay: Stream completed"); stopPlayer(); }
+        });
+        
+        try {
+          const props = { "UserAgent": navigator.userAgent };
+          webapis.avplay.setStreamingProperty("SET_PROPERTIES", JSON.stringify(props));
+        } catch(e) { log("AVPlay setProperty warning: " + e.message); }
+        
+        webapis.avplay.prepareAsync(function() {
+          log("AVPlay: prepareAsync success, starting playback...");
+          webapis.avplay.play();
+        }, function(error) {
+          log("AVPlay prepareAsync error: " + error.name + " " + error.message);
+        });
+        
+        playerEl._hasAVPlay = true;
+      } catch (e) {
+        log(`AVPlay Exception: ${e.name} ${e.message}`);
+      }
+    } else if ((isSafariPlayer || isTizenPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
       log(`Using Native Player (Safari/Tizen)...`);
       video.src = streamUrl;
       video.play().catch(e => log(`Play failed: ${e.name} - ${e.message}`));
@@ -673,6 +708,14 @@ async function playTitle(titleId, episodeId = null) {
 function stopPlayer() {
   currentView = 'details';
   playerEl.style.display = 'none';
+  
+  if (playerEl._hasAVPlay && typeof webapis !== 'undefined' && webapis.avplay) {
+    try {
+      webapis.avplay.stop();
+      webapis.avplay.close();
+    } catch (e) {}
+    playerEl._hasAVPlay = false;
+  }
   
   // Clean up hls.js instance if exists
   if (playerEl._hlsInstance) {
