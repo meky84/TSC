@@ -4,15 +4,17 @@ const API_URL = '/proxy/it/archive'; // Use proxy endpoint
 const PROXY_URL = 'https://tsc-6qr9.onrender.com'; // Base URL of the Python proxy server
 
 let cdnUrl = 'https://cdn.streamingcommunityz.associates'; // Will load dynamically from proxy
+let baseSite = 'https://streamingcommunityz.associates'; // Will load dynamically from proxy
 
 // Fetch dynamic config from proxy
 async function loadProxyConfig() {
   try {
     const response = await fetch(`${PROXY_URL}/proxy-config`);
     const config = await response.json();
-    if (config && config.cdn_site) {
-      cdnUrl = config.cdn_site;
-      console.log("Loaded dynamic CDN URL:", cdnUrl);
+    if (config) {
+      if (config.cdn_site) cdnUrl = config.cdn_site;
+      if (config.base_site) baseSite = config.base_site;
+      console.log("Loaded dynamic config:", { cdnUrl, baseSite });
     }
   } catch (err) {
     console.warn("Could not load dynamic config from proxy, using fallback:", err);
@@ -657,7 +659,12 @@ async function playTitle(titleId, episodeId = null) {
     if (!embedUrl) throw new Error("Embed URL not found");
     
     // Redirect through local proxy to bypass CORS/sandboxing issues
-    const localUrl = embedUrl.replace('https://streamingcommunityz.associates', PROXY_URL + '/proxy');
+    let localUrl = embedUrl;
+    if (embedUrl.includes(baseSite)) {
+      localUrl = embedUrl.replace(baseSite, PROXY_URL + '/proxy');
+    } else if (embedUrl.includes('https://vixcloud.co')) {
+      localUrl = embedUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+    }
     
     // Crucial: Removed HTML5 sandbox attribute to prevent player anti-sandbox scripts from crashing.
     // Instead, we use setupPlayerIframe same-origin overrides to block popups.
