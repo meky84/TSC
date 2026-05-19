@@ -160,7 +160,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         text = text.replace("https://vixcloud.co", f"{proxy_base}/vixcloud")
                         text = text.replace(r"https:\/\/vixcloud.co", fr"{proxy_base}\/vixcloud")
                         text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
-                        text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base.replace('/', r'\/')}\/vixcontent\/\1", text)
+                        vixcontent_repl = proxy_base.replace('/', '\\/') + '\\/vixcontent\\/\\1'
+                        text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", vixcontent_repl, text)
                         
                         # Riscrivi anche il dominio di StreamingCommunity per convogliare gli asset statici (JS/CSS/fonts) nel proxy ed evitare errori CORS
                         text = text.replace(BASE_SITE, f"{proxy_base}/proxy")
