@@ -118,6 +118,43 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(logs_str.encode("utf-8"))
             return
 
+        elif self.path.startswith("/test-vix"):
+            import urllib.parse
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            target = params.get("url", [None])[0]
+            
+            res_str = ""
+            if target:
+                res_str += f"Testing direct fetch to Vixcloud URL from Render: {target}\n"
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Referer": "https://streamingcommunityz.associates/",
+                    "Origin": "https://streamingcommunityz.associates"
+                }
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(target, headers=headers)
+                try:
+                    with urllib.request.urlopen(req, context=ctx) as r:
+                        body = r.read()
+                        res_str += f"Status: {r.status}\n"
+                        res_str += f"Headers: {dict(r.headers)}\n"
+                        res_str += f"Body size: {len(body)}\n"
+                        res_str += f"Body preview: {body[:1500].decode('utf-8', errors='ignore')}\n"
+                except Exception as e:
+                    res_str += f"Error: {e}\n"
+            else:
+                res_str = "No URL parameter provided. E.g. /test-vix?url=..."
+                
+            self.send_response(200)
+            self._cors_headers()
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(res_str.encode("utf-8"))
+            return
+
         # --- Proxy verso il sito principale ---
         elif self.path.startswith("/proxy/"):
             target_path = self.path[len("/proxy"):]   # /it/archive, /it/search?q=..., ecc.
