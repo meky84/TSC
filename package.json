@@ -1,8 +1,8 @@
 {
-  "name": "stc102",
+  "name": "stc100",
   "version": "1.0.6",
   "packageType": "app",
-  "appName": "STC 1.0.6",
+  "appName": "STC106",
   "description": "Client non ufficiale di StreamingCommunity per Smart TV Samsung (Tizen).",
   "appPath": "index.html",
   "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious"]
