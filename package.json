@@ -1,8 +1,8 @@
 {
-  "name": "stc101",
-  "version": "1.0.1",
+  "name": "stc102",
+  "version": "1.0.2",
   "packageType": "app",
   "appName": "StreamCom",
   "appPath": "index.html",
-  "keys": ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Return", "Back"]
+  "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious"]
 }
