@@ -671,18 +671,17 @@ async function playTitle(titleId, episodeId = null) {
       } catch (e) {
         log(`AVPlay Exception: ${e.name} ${e.message}`);
       }
-    } else if ((isSafariPlayer || isTizenPlayer) && video.canPlayType('application/vnd.apple.mpegurl')) {
-      log(`Using Native Player (Safari/Tizen)...`);
-      video.src = streamUrl;
-      video.play().catch(e => log(`Play failed: ${e.name} - ${e.message}`));
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      log(`Using hls.js player (Version: ${Hls.version || 'unknown'})...`);
+      log(`Using hls.js player with CORS proxy...`);
+      // Proxy the m3u8 playlist through allorigins to bypass CORS on Tizen
+      const proxiedStreamUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(streamUrl)}`;
+      
       const hls = new Hls({
         maxMaxBufferLength: 10,
         enableWorker: true,
         debug: false
       });
-      hls.loadSource(streamUrl);
+      hls.loadSource(proxiedStreamUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, function() {
         log(`HLS Manifest parsed. Attempting play...`);
@@ -694,14 +693,17 @@ async function playTitle(titleId, episodeId = null) {
           log(`Fatal error! Trying to recover...`);
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              // Se fallisce il proxy, prova a fallback sul Native Player senza proxy
+              log(`Network error, falling back to Native Player...`);
+              video.src = streamUrl;
+              video.play().catch(e => log(`Fallback Play failed: ${e.message}`));
+              hls.destroy();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError();
               break;
             default:
               hls.destroy();
-              log(`HLS Destroyed.`);
               break;
           }
         }
