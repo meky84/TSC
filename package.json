@@ -1,8 +1,8 @@
 {
-  "name": "meky120",
-  "version": "1.2.0",
+  "name": "meky121",
+  "version": "1.2.1",
   "packageType": "app",
-  "appName": "STC",
+  "appName": "TSC",
   "description": "Client non ufficiale di StreamingCommunity per Smart TV Samsung (Tizen).",
   "appPath": "index.html",
   "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop", "MediaFastForward", "MediaRewind", "MediaTrackNext", "MediaTrackPrevious"]

@@ -60,9 +60,17 @@ let searchInputEl, btnClearEl, filterAllEl, filterMovieEl, filterTvEl;
 
 // Helper per chiamate API tramite proxy (necessario per aggirare i blocchi CORS sul browser locale)
 async function proxyFetch(url, options = {}) {
+  // Se l'URL fa già parte del nostro proxy o è un percorso relativo del proxy, usalo direttamente
+  if (url.startsWith(PROXY_URL)) {
+    return fetch(url, options);
+  }
+  if (url.startsWith('/proxy/') || url.startsWith('/vixcloud/') || url.startsWith('/vixcontent/')) {
+    return fetch(PROXY_URL + url, options);
+  }
+
   const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
   
-  // Try direct fetch on Tizen to avoid IP mismatch for Vixcloud tokens
+  // Su Tizen proviamo una chiamata diretta per evitare l'IP mismatch del token Vixcloud
   if (isTizenPlayer) {
     try {
       console.log(`[Tizen] Attempting direct fetch for: ${url}`);
@@ -75,7 +83,29 @@ async function proxyFetch(url, options = {}) {
     }
   }
 
-  const targetUrl = PROXY_URL + '/proxy/' + url;
+  // Risoluzione dell'endpoint corretto del proxy in base all'host target
+  let targetUrl;
+  if (url.includes('vixcloud.co')) {
+    const path = url.split('vixcloud.co')[1];
+    targetUrl = `${PROXY_URL}/vixcloud${path}`;
+  } else if (url.includes('vix-content.net')) {
+    const match = url.match(/https?:\/\/([a-zA-Z0-9\-]+)\.vix\-content\.net(.*)/);
+    if (match) {
+      targetUrl = `${PROXY_URL}/vixcontent/${match[1]}${match[2]}`;
+    } else {
+      targetUrl = `${PROXY_URL}/proxy/${url}`;
+    }
+  } else if (url.includes('streamingcommunity')) {
+    const match = url.match(/https?:\/\/streamingcommunity[a-z0-9\-.]+(.*)/);
+    if (match) {
+      targetUrl = `${PROXY_URL}/proxy${match[1]}`;
+    } else {
+      targetUrl = `${PROXY_URL}/proxy/${url}`;
+    }
+  } else {
+    targetUrl = `${PROXY_URL}/proxy/${url}`;
+  }
+
   console.log(`[Proxy] Fetching via proxy: ${targetUrl}`);
   return fetch(targetUrl, options);
 }
@@ -659,7 +689,9 @@ async function playTitle(titleId, episodeId = null) {
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       log(`Using hls.js player with CORS proxy...`);
       // Proxy the m3u8 playlist through our Render proxy to bypass CORS on Tizen AND keep the IP matching!
-      const proxiedStreamUrl = `${PROXY_URL}/proxy/${streamUrl}`;
+      const proxiedStreamUrl = streamUrl.includes('https://vixcloud.co')
+        ? streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud')
+        : `${PROXY_URL}/proxy/${streamUrl}`;
       
       const hls = new Hls({
         maxMaxBufferLength: 10,
