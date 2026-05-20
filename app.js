@@ -58,6 +58,28 @@ let loadedTitleData = null; // Stored metadata of the opened title
 let galleryEl, detailsEl, playerEl;
 let searchInputEl, btnClearEl, filterAllEl, filterMovieEl, filterTvEl;
 
+// Helper per chiamate API tramite proxy (necessario per aggirare i blocchi CORS sul browser locale)
+async function proxyFetch(url, options = {}) {
+  const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
+  
+  // Try direct fetch on Tizen to avoid IP mismatch for Vixcloud tokens
+  if (isTizenPlayer) {
+    try {
+      console.log(`[Tizen] Attempting direct fetch for: ${url}`);
+      const directRes = await fetch(url, options);
+      if (directRes.ok) {
+        return directRes;
+      }
+    } catch (e) {
+      console.log(`[Tizen] Direct fetch failed due to CORS or network error, falling back to proxy. Error: ${e.message}`);
+    }
+  }
+
+  const targetUrl = PROXY_URL + '/proxy/' + url;
+  console.log(`[Proxy] Fetching via proxy: ${targetUrl}`);
+  return fetch(targetUrl, options);
+}
+
 // Helper to fetch JSON data from the page's data-page attribute
 async function fetchData() {
   const response = await fetch(`${PROXY_URL}${API_URL}`);
@@ -529,28 +551,28 @@ function getPlayerVideo() {
 
 // Extract the direct HLS stream URL from the StreamingCommunity embed URL
 async function extractStreamUrl(embedUrl) {
-  // 1. Fetch StreamingCommunity embed page (proxied)
-  let scEmbedUrl = embedUrl;
-  if (scEmbedUrl.includes(baseSite)) {
-    scEmbedUrl = scEmbedUrl.replace(baseSite, PROXY_URL + '/proxy');
-  }
-  
-  console.log("Fetching SC embed iframe:", scEmbedUrl);
-  const scResponse = await fetch(scEmbedUrl);
+  // 1. Fetch StreamingCommunity embed page
+  console.log("Fetching SC embed iframe:", embedUrl);
+  const scResponse = await proxyFetch(embedUrl);
   const scHtml = await scResponse.text();
   
   // Extract Vixcloud iframe URL
   const iframeMatch = scHtml.match(/<iframe[^>]+src=["']([^"']+)["']/);
   if (!iframeMatch) throw new Error("Vixcloud iframe non trovato nella pagina di embed");
-  let vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
+  const vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
   
-  // 2. Fetch Vixcloud page (proxied)
-  if (vixcloudUrl.includes('https://vixcloud.co')) {
-    vixcloudUrl = vixcloudUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
-  }
-  
+  // 2. Fetch Vixcloud page
   console.log("Fetching Vixcloud HTML:", vixcloudUrl);
-  const vixResponse = await fetch(vixcloudUrl);
+  
+  // For Vixcloud, we want to force direct fetch on Tizen if possible, to avoid IP mismatch.
+  // proxyFetch automatically attempts direct fetch first on Tizen.
+  // If we are proxying, we need to rewrite vixcloudUrl to use the /vixcloud endpoint of our proxy
+  // BUT proxyFetch already does `/proxy/{url}`, which might work.
+  // Actually, our Python proxy handles `/vixcloud/...` to rewrite internal vixcloud links.
+  // Let's just use proxyFetch. Wait, proxyFetch does `/proxy/https://vixcloud.co/embed/...`
+  // Our Python server supports `/proxy/URL`. Let's use that.
+  
+  const vixResponse = await proxyFetch(vixcloudUrl);
   const vixHtml = await vixResponse.text();
   
   // Extract window.masterPlaylist params using regex
