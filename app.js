@@ -561,16 +561,17 @@ async function extractStreamUrl(embedUrl) {
   if (!iframeMatch) throw new Error("Vixcloud iframe non trovato nella pagina di embed");
   const vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
   
-  // 2. Fetch Vixcloud page
-  console.log("Fetching Vixcloud HTML:", vixcloudUrl);
+  const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
   
-  // For Vixcloud, we want to force direct fetch on Tizen if possible, to avoid IP mismatch.
-  // proxyFetch automatically attempts direct fetch first on Tizen.
-  // If we are proxying, we need to rewrite vixcloudUrl to use the /vixcloud endpoint of our proxy
-  // BUT proxyFetch already does `/proxy/{url}`, which might work.
-  // Actually, our Python proxy handles `/vixcloud/...` to rewrite internal vixcloud links.
-  // Let's just use proxyFetch. Wait, proxyFetch does `/proxy/https://vixcloud.co/embed/...`
-  // Our Python server supports `/proxy/URL`. Let's use that.
+  // Per Tizen, usiamo direttamente l'iframe di Vixcloud! 
+  // Questo evita blocchi CORS, mismatch di IP del token e blocchi Cloudflare.
+  if (isTizenPlayer) {
+    console.log("Tizen detected: returning Vixcloud embed URL directly for iframe player.");
+    return { type: 'iframe', url: vixcloudUrl };
+  }
+  
+  // 2. Fetch Vixcloud page (For PC / Safari)
+  console.log("Fetching Vixcloud HTML:", vixcloudUrl);
   
   const vixResponse = await proxyFetch(vixcloudUrl);
   const vixHtml = await vixResponse.text();
@@ -621,7 +622,24 @@ async function playTitle(titleId, episodeId = null) {
     const embedUrl = await fetchEmbedUrl(titleId, episodeId);
     
     log(`Extracting stream URL from: ${embedUrl.substring(0, 50)}...`);
-    const streamUrl = await extractStreamUrl(embedUrl);
+    const streamData = await extractStreamUrl(embedUrl);
+    
+    if (streamData.type === 'iframe') {
+      log(`Rendering Vixcloud directly via iframe...`);
+      playerEl.innerHTML = `
+        <div id="debug-overlay" style="position: absolute; top: 10px; left: 10px; z-index: 9999; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; font-size: 14px; font-family: monospace; white-space: pre-wrap; max-width: 80%; pointer-events: none;">[Debug Log]\nIframe rendered. Usa le frecce per cliccare Play o il puntatore.</div>
+        <iframe id="vix-iframe" src="${streamData.url}" style="width: 100%; height: 100%; border: none; background: #000;" allow="autoplay; fullscreen"></iframe>
+        <div id="iframe-return-hint" style="position: absolute; bottom: 20px; right: 20px; color: white; background: rgba(0,0,0,0.7); padding: 10px; font-size: 18px; z-index: 10000; pointer-events: none; border-radius: 5px;">Premi [Return/Back] per uscire</div>
+      `;
+      // Give focus to iframe so keyboard events might reach it
+      setTimeout(() => {
+        const iframe = document.getElementById('vix-iframe');
+        if (iframe) iframe.focus();
+      }, 1000);
+      return;
+    }
+    
+    const streamUrl = streamData.url;
     log(`Stream URL ready.`);
     
     const video = document.getElementById('native-player');
