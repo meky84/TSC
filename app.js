@@ -689,9 +689,12 @@ async function playTitle(titleId, episodeId = null) {
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       log(`Using hls.js player with CORS proxy...`);
       // Proxy the m3u8 playlist through our Render proxy to bypass CORS on Tizen AND keep the IP matching!
-      const proxiedStreamUrl = streamUrl.includes('https://vixcloud.co')
-        ? streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud')
-        : `${PROXY_URL}/proxy/${streamUrl}`;
+      let proxiedStreamUrl = streamUrl;
+      if (streamUrl.includes('https://vixcloud.co')) {
+        proxiedStreamUrl = streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+      } else if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/')) {
+        proxiedStreamUrl = `${PROXY_URL}/proxy/${streamUrl}`;
+      }
       
       const hls = new Hls({
         maxMaxBufferLength: 10,
