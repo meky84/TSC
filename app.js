@@ -561,16 +561,7 @@ async function extractStreamUrl(embedUrl) {
   if (!iframeMatch) throw new Error("Vixcloud iframe non trovato nella pagina di embed");
   const vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
   
-  const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
-  
-  // Per Tizen, usiamo direttamente l'iframe di Vixcloud! 
-  // Questo evita blocchi CORS, mismatch di IP del token e blocchi Cloudflare.
-  if (isTizenPlayer) {
-    console.log("Tizen detected: returning Vixcloud embed URL directly for iframe player.");
-    return { type: 'iframe', url: vixcloudUrl };
-  }
-  
-  // 2. Fetch Vixcloud page (For PC / Safari)
+  // 2. Fetch Vixcloud page
   console.log("Fetching Vixcloud HTML:", vixcloudUrl);
   
   const vixResponse = await proxyFetch(vixcloudUrl);
@@ -589,20 +580,11 @@ async function extractStreamUrl(embedUrl) {
   const expires = expiresMatch[1];
   const playlistBaseUrl = urlMatch[1];
   
-  // 3. Construct stream URL (clean query params from playlistBaseUrl first to prevent double question marks)
+  // 3. Construct stream URL
   const cleanPlaylistUrl = playlistBaseUrl.split('?')[0];
-  let streamUrl = `${cleanPlaylistUrl}?token=${token}&expires=${expires}&b=1`;
-  console.log("Constructed playlist URL:", streamUrl);
+  const streamUrl = `${cleanPlaylistUrl}?token=${token}&expires=${expires}&b=1`;
   
-  // Rewrite to proxy only on local PC development (localhost) to bypass CORS.
-  // On Tizen/TV, we stream directly from vixcloud.co to avoid the 403 Cloudflare blocks on cloud proxies (like Render).
-  const isLocalhost = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  const isTizen = (window.tizen !== undefined || navigator.userAgent.includes('Tizen'));
-  if (isLocalhost && !isTizen && streamUrl.includes('https://vixcloud.co')) {
-    streamUrl = streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
-  }
-  
-  return streamUrl;
+  return { type: 'hls', url: streamUrl };
 }
 
 // Launch Video Player using HTML5 video tag with direct HLS stream
@@ -623,21 +605,6 @@ async function playTitle(titleId, episodeId = null) {
     
     log(`Extracting stream URL from: ${embedUrl.substring(0, 50)}...`);
     const streamData = await extractStreamUrl(embedUrl);
-    
-    if (streamData.type === 'iframe') {
-      log(`Rendering Vixcloud directly via iframe...`);
-      playerEl.innerHTML = `
-        <div id="debug-overlay" style="position: absolute; top: 10px; left: 10px; z-index: 9999; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; font-size: 14px; font-family: monospace; white-space: pre-wrap; max-width: 80%; pointer-events: none;">[Debug Log]\nIframe rendered. Usa le frecce per cliccare Play o il puntatore.</div>
-        <iframe id="vix-iframe" src="${streamData.url}" style="width: 100%; height: 100%; border: none; background: #000;" allow="autoplay; fullscreen"></iframe>
-        <div id="iframe-return-hint" style="position: absolute; bottom: 20px; right: 20px; color: white; background: rgba(0,0,0,0.7); padding: 10px; font-size: 18px; z-index: 10000; pointer-events: none; border-radius: 5px;">Premi [Return/Back] per uscire</div>
-      `;
-      // Give focus to iframe so keyboard events might reach it
-      setTimeout(() => {
-        const iframe = document.getElementById('vix-iframe');
-        if (iframe) iframe.focus();
-      }, 1000);
-      return;
-    }
     
     const streamUrl = streamData.url;
     log(`Stream URL ready.`);
@@ -691,8 +658,8 @@ async function playTitle(titleId, episodeId = null) {
       }
     } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
       log(`Using hls.js player with CORS proxy...`);
-      // Proxy the m3u8 playlist through allorigins to bypass CORS on Tizen
-      const proxiedStreamUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(streamUrl)}`;
+      // Proxy the m3u8 playlist through our Render proxy to bypass CORS on Tizen AND keep the IP matching!
+      const proxiedStreamUrl = `${PROXY_URL}/proxy/${streamUrl}`;
       
       const hls = new Hls({
         maxMaxBufferLength: 10,
