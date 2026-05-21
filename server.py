@@ -23,8 +23,10 @@ CONFIG_FILE = "config.json"
 DEFAULT_BASE_SITE = "https://streamingcommunityz.associates"
 RENDER_URL = "https://tsc84.onrender.com"
 # Rileva se siamo in ambiente locale (non su Render)
+# Detect if running in Render environment (IS_LOCAL is False on Render)
 IS_LOCAL = "RENDER" not in os.environ
 # Forza il relay anche quando l'app gira su Render (usa la variabile d'ambiente FORCE_RELAY)
+# Enable forced relay on Render via FORCE_RELAY env var (set to "1" to activate)
 FORCE_RELAY = os.getenv("FORCE_RELAY", "0") == "1"
 
 def load_config():
@@ -166,6 +168,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                 super().do_GET()
             else:
                 # Controlla Referer per instradare le richieste di asset relativi al host giusto
+                # Navigation focusable elements (playerContainer removed to keep Enter key behavior clean)
+                # const focusableIds = ['titleId', 'episodeId', 'btn-hls-proxy', 'btn-iframe-vixcloud', 'btn-hls-direct'];
                 referer = self.headers.get("Referer", "")
                 if "/vixcloud/" in referer or "vixcloud.co" in referer:
                     if IS_LOCAL:
