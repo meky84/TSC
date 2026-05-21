@@ -171,17 +171,9 @@
     </div>
 
     <div class="methods-grid">
-        <button id="btn-hls-proxy" onclick="testMethod('hls_proxy')">
-            Method 1: Local Proxy + HLS
-            <span class="subtitle">Relays via Render server -> hls.js</span>
-        </button>
         <button id="btn-iframe-vixcloud" onclick="testMethod('iframe_vixcloud')">
-            Method 2: Vixcloud Iframe
-            <span class="subtitle">Direct embed of vixcloud.co iframe</span>
-        </button>
-        <button id="btn-hls-direct" onclick="testMethod('hls_direct')">
-            Method 3: Direct HLS
-            <span class="subtitle">hls.js directly to vixcloud.co (Expect 403)</span>
+            ▶ Play
+            <span class="subtitle">Vixcloud Iframe</span>
         </button>
     </div>
 
@@ -201,7 +193,8 @@
         : 'https://tsc84.onrender.com');
 
     // Spatial Navigation for TV Remote Controls
-    const focusableIds = ['titleId', 'episodeId', 'btn-hls-proxy', 'btn-iframe-vixcloud', 'btn-hls-direct'];
+    // Navigation focusable elements (only Method 2 / iframe_vixcloud remains)
+    const focusableIds = ['titleId', 'episodeId', 'btn-iframe-vixcloud'];
     let focusableElements = [];
     let activeFocusIdx = 0;
 
@@ -333,110 +326,25 @@
             log(`Proxy Vixcloud URL: ${vixcloudUrlProxy}`);
 
             if (method === 'iframe_vixcloud') {
-                log("Method: Iframe Vixcloud -> Inserting Iframe (via proxy)", "info");
-                // Use the proxied URL so CSP frame-ancestors doesn't block us
-                let proxyIframeUrl = vixcloudUrlProxy;
-                // Make sure it goes through our proxy, not directly to vixcloud.co
-                if (proxyIframeUrl.startsWith('https://vixcloud.co')) {
-                    proxyIframeUrl = proxyIframeUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
+                log("Method: Iframe Vixcloud -> Inserting Iframe", "info");
+                // Need to use the real vixcloud.co URL for direct iframe
+                let realVixcloudUrl = vixcloudUrlRaw;
+                if (realVixcloudUrl.includes('tsc84.onrender.com/vixcloud')) {
+                     realVixcloudUrl = realVixcloudUrl.replace('https://tsc84.onrender.com/vixcloud', 'https://vixcloud.co');
+                } else if (realVixcloudUrl.includes('http://localhost:8000/vixcloud')) {
+                     realVixcloudUrl = realVixcloudUrl.replace('http://localhost:8000/vixcloud', 'https://vixcloud.co');
+                } else if (realVixcloudUrl.includes(PROXY_URL + '/vixcloud')) {
+                     realVixcloudUrl = realVixcloudUrl.replace(PROXY_URL + '/vixcloud', 'https://vixcloud.co');
+                } else if (realVixcloudUrl.includes(window.location.origin + '/vixcloud')) {
+                     realVixcloudUrl = realVixcloudUrl.replace(window.location.origin + '/vixcloud', 'https://vixcloud.co');
                 }
                 
-                log(`Proxy Iframe URL: ${proxyIframeUrl}`);
+                log(`Real Vixcloud URL: ${realVixcloudUrl}`);
                 const iframe = document.createElement('iframe');
-                iframe.src = proxyIframeUrl;
+                iframe.src = realVixcloudUrl;
                 iframe.allowFullscreen = true;
-                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
                 playerContainer.appendChild(iframe);
                 return;
-            }
-
-            // 3. Fetch Vixcloud HTML to get Token and Playlist ID
-            log(`Fetching Vixcloud HTML via proxy...`);
-            const vixRes = await fetch(vixcloudUrlProxy);
-            const vixHtml = await vixRes.text();
-            
-            const tokenMatch = vixHtml.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
-            const expiresMatch = vixHtml.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
-            const urlMatch = vixHtml.match(/url\s*:\s*['"]([^'"]+\/playlist\/[^'"]+)['"]/);
-            
-            if (!tokenMatch || !expiresMatch || !urlMatch) {
-                throw new Error("Could not extract token, expires, or playlist url from Vixcloud HTML");
-            }
-
-            const token = tokenMatch[1];
-            const expires = expiresMatch[1];
-            let playlistRawUrl = urlMatch[1];
-            
-            log(`Token: ${token}`);
-            log(`Expires: ${expires}`);
-            
-            // Reconstruct Playlist URL
-            const pidMatch = playlistRawUrl.match(/\/playlist\/(\d+)/);
-            if (!pidMatch) throw new Error("Could not find playlist ID");
-            const pid = pidMatch[1];
-
-            let finalPlaylistUrl;
-            if (method === 'hls_proxy') {
-                finalPlaylistUrl = `${PROXY_URL}/vixcloud/playlist/${pid}?token=${token}&expires=${expires}&b=1`;
-                log("Method: Local Proxy + HLS -> Playing via hls.js", "info");
-            } else if (method === 'hls_direct') {
-                finalPlaylistUrl = `https://vixcloud.co/playlist/${pid}?token=${token}&expires=${expires}&b=1`;
-                log("Method: Direct HLS -> Expecting 403 from vixcloud.co", "warn");
-            }
-
-            log(`Playlist URL: ${finalPlaylistUrl}`);
-
-            // Initialize Player
-            const video = document.createElement('video');
-            video.controls = true;
-            playerContainer.appendChild(video);
-
-            if (Hls.isSupported()) {
-                log("HLS.js supported. Initializing...");
-                const hls = new Hls({
-                    debug: false,
-                    enableWorker: true
-                });
-                
-                hls.on(Hls.Events.ERROR, function (event, data) {
-                    if (data.fatal) {
-                        switch (data.type) {
-                            case Hls.ErrorTypes.NETWORK_ERROR:
-                                log(`HLS Network Error: ${data.details}`, "error");
-                                break;
-                            case Hls.ErrorTypes.MEDIA_ERROR:
-                                log(`HLS Media Error: ${data.details}`, "error");
-                                hls.recoverMediaError();
-                                break;
-                            default:
-                                log(`HLS Error: ${data.details}`, "error");
-                                hls.destroy();
-                                break;
-                        }
-                    } else {
-                         log(`HLS Non-fatal Error: ${data.details}`, "warn");
-                    }
-                });
-
-                hls.on(Hls.Events.MANIFEST_LOADED, function () {
-                    log("HLS Manifest Loaded!", "success");
-                    video.play().catch(e => log(`Autoplay failed: ${e.message}`, "warn"));
-                });
-
-                hls.loadSource(finalPlaylistUrl);
-                hls.attachMedia(video);
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                log("Native HLS supported. Loading...");
-                video.src = finalPlaylistUrl;
-                video.addEventListener('loadedmetadata', function() {
-                    log("Native video loaded metadata", "success");
-                    video.play().catch(e => log(`Autoplay failed: ${e.message}`, "warn"));
-                });
-                video.addEventListener('error', function(e) {
-                     log(`Native video error: ${video.error ? video.error.code : 'Unknown'}`, "error");
-                });
-            } else {
-                log("HLS is not supported in this browser.", "error");
             }
 
         } catch (err) {
