@@ -333,23 +333,19 @@
             log(`Proxy Vixcloud URL: ${vixcloudUrlProxy}`);
 
             if (method === 'iframe_vixcloud') {
-                log("Method: Iframe Vixcloud -> Inserting Iframe", "info");
-                // Need to use the real vixcloud.co URL for direct iframe
-                let realVixcloudUrl = vixcloudUrlRaw;
-                if (realVixcloudUrl.includes('tsc84.onrender.com/vixcloud')) {
-                     realVixcloudUrl = realVixcloudUrl.replace('https://tsc84.onrender.com/vixcloud', 'https://vixcloud.co');
-                } else if (realVixcloudUrl.includes('http://localhost:8000/vixcloud')) {
-                     realVixcloudUrl = realVixcloudUrl.replace('http://localhost:8000/vixcloud', 'https://vixcloud.co');
-                } else if (realVixcloudUrl.includes(PROXY_URL + '/vixcloud')) {
-                     realVixcloudUrl = realVixcloudUrl.replace(PROXY_URL + '/vixcloud', 'https://vixcloud.co');
-                } else if (realVixcloudUrl.includes(window.location.origin + '/vixcloud')) {
-                     realVixcloudUrl = realVixcloudUrl.replace(window.location.origin + '/vixcloud', 'https://vixcloud.co');
+                log("Method: Iframe Vixcloud -> Inserting Iframe (via proxy)", "info");
+                // Use the proxied URL so CSP frame-ancestors doesn't block us
+                let proxyIframeUrl = vixcloudUrlProxy;
+                // Make sure it goes through our proxy, not directly to vixcloud.co
+                if (proxyIframeUrl.startsWith('https://vixcloud.co')) {
+                    proxyIframeUrl = proxyIframeUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
                 }
                 
-                log(`Real Vixcloud URL: ${realVixcloudUrl}`);
+                log(`Proxy Iframe URL: ${proxyIframeUrl}`);
                 const iframe = document.createElement('iframe');
-                iframe.src = realVixcloudUrl;
+                iframe.src = proxyIframeUrl;
                 iframe.allowFullscreen = true;
+                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
                 playerContainer.appendChild(iframe);
                 return;
             }
