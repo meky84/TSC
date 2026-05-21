@@ -24,6 +24,8 @@ DEFAULT_BASE_SITE = "https://streamingcommunityz.associates"
 RENDER_URL = "https://tsc84.onrender.com"
 # Rileva se siamo in ambiente locale (non su Render)
 IS_LOCAL = "RENDER" not in os.environ
+# Forza il relay anche quando l'app gira su Render (usa la variabile d'ambiente FORCE_RELAY)
+FORCE_RELAY = os.getenv("FORCE_RELAY", "0") == "1"
 
 def load_config():
     base_site = DEFAULT_BASE_SITE
@@ -134,10 +136,10 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- Proxy verso Vixcloud ---
         elif self.path.startswith("/vixcloud/"):
-            if IS_LOCAL:
-                # In locale, Cloudflare blocca il nostro IP residenziale.
+            if IS_LOCAL or FORCE_RELAY:
+                # In locale (or forced), Cloudflare blocca il nostro IP residenziale.
                 # Inoltriamo la richiesta attraverso Render (IP datacenter autorizzato).
-                log_debug(f"[LOCAL] Relaying /vixcloud/ through Render: {RENDER_URL}{self.path}")
+                log_debug(f"[RELAY] Relaying /vixcloud/ through Render: {RENDER_URL}{self.path}")
                 self._proxy_request(RENDER_URL + self.path, relay_render=True)
             else:
                 target_path = self.path[len("/vixcloud"):]
@@ -145,8 +147,8 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- Proxy verso Vixcontent (CDN video) ---
         elif self.path.startswith("/vixcontent/"):
-            if IS_LOCAL:
-                log_debug(f"[LOCAL] Relaying /vixcontent/ through Render: {RENDER_URL}{self.path}")
+            if IS_LOCAL or FORCE_RELAY:
+                log_debug(f"[RELAY] Relaying /vixcontent/ through Render: {RENDER_URL}{self.path}")
                 self._proxy_request(RENDER_URL + self.path, relay_render=True)
             else:
                 parts = self.path[len("/vixcontent/"):].split("/", 1)
@@ -180,7 +182,7 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
         ctx.verify_mode   = ssl.CERT_NONE
 
         headers = {
-            "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/124.0.0.0",
             "Accept":          "*/*",
             "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
         }
@@ -249,9 +251,11 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         
                         # Rimuovi script pubblicitari e anti-debugger da Vixcloud
                         if "text/html" in content_type:
+                            # Rimuoviamo solo gli script noti di advertising/tracking; manteniamo gli script del player.
                             text = re.sub(r'<script[^>]*sechw\.com[^>]*>.*?</script>', '', text, flags=re.DOTALL)
-                            text = re.sub(r'<script[^>]*>(?:(?!<script)[\s\S])*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
-                            text = re.sub(r'<script[^>]*>(?:(?!<script)[\s\S])*?oe\.entries[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            # (Gli altri pattern di rimozione sono stati commentati per preservare il UI del player.)
+                            # text = re.sub(r'<script[^>]*>?(?:(?!<script)[\s\S])*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            # text = re.sub(r'<script[^>]*>?(?:(?!<script)[\s\S])*?oe\.entries[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
                             # Previene i redirect javascript forzati sostituendo window.top e location.replace
                             text = text.replace("window.top", "window.self")
                             text = text.replace("top.location", "self.location")
