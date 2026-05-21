@@ -21,6 +21,9 @@ import re
 PORT = int(os.environ.get("PORT", 8000))
 CONFIG_FILE = "config.json"
 DEFAULT_BASE_SITE = "https://streamingcommunityz.associates"
+RENDER_URL = "https://tsc84.onrender.com"
+# Rileva se siamo in ambiente locale (non su Render)
+IS_LOCAL = "RENDER" not in os.environ
 
 def load_config():
     base_site = DEFAULT_BASE_SITE
@@ -131,16 +134,26 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
 
         # --- Proxy verso Vixcloud ---
         elif self.path.startswith("/vixcloud/"):
-            target_path = self.path[len("/vixcloud"):]
-            self._proxy_request("https://vixcloud.co" + target_path)
+            if IS_LOCAL:
+                # In locale, Cloudflare blocca il nostro IP residenziale.
+                # Inoltriamo la richiesta attraverso Render (IP datacenter autorizzato).
+                log_debug(f"[LOCAL] Relaying /vixcloud/ through Render: {RENDER_URL}{self.path}")
+                self._proxy_request(RENDER_URL + self.path, relay_render=True)
+            else:
+                target_path = self.path[len("/vixcloud"):]
+                self._proxy_request("https://vixcloud.co" + target_path)
 
         # --- Proxy verso Vixcontent (CDN video) ---
         elif self.path.startswith("/vixcontent/"):
-            parts = self.path[len("/vixcontent/"):].split("/", 1)
-            subdomain = parts[0]
-            remaining_path = parts[1] if len(parts) > 1 else ""
-            target_url = f"https://{subdomain}.vix-content.net/{remaining_path}"
-            self._proxy_request(target_url)
+            if IS_LOCAL:
+                log_debug(f"[LOCAL] Relaying /vixcontent/ through Render: {RENDER_URL}{self.path}")
+                self._proxy_request(RENDER_URL + self.path, relay_render=True)
+            else:
+                parts = self.path[len("/vixcontent/"):].split("/", 1)
+                subdomain = parts[0]
+                remaining_path = parts[1] if len(parts) > 1 else ""
+                target_url = f"https://{subdomain}.vix-content.net/{remaining_path}"
+                self._proxy_request(target_url)
 
         # --- File locali con fallback proxy ---
         else:
@@ -153,11 +166,15 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                 # Controlla Referer per instradare le richieste di asset relativi al host giusto
                 referer = self.headers.get("Referer", "")
                 if "/vixcloud/" in referer or "vixcloud.co" in referer:
-                    self._proxy_request("https://vixcloud.co" + self.path)
+                    if IS_LOCAL:
+                        log_debug(f"[LOCAL] Relaying vixcloud asset through Render: {RENDER_URL}/vixcloud{self.path}")
+                        self._proxy_request(RENDER_URL + "/vixcloud" + self.path, relay_render=True)
+                    else:
+                        self._proxy_request("https://vixcloud.co" + self.path)
                 else:
                     self._proxy_request(BASE_SITE + self.path)
 
-    def _proxy_request(self, url):
+    def _proxy_request(self, url, relay_render=False):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode   = ssl.CERT_NONE
@@ -212,6 +229,20 @@ class StreamComHandler(http.server.SimpleHTTPRequestHandler):
                         escaped_cdn = CDN_SITE.replace("/", r"\/")
                         escaped_proxy_cdn = f"{proxy_base}/cdn".replace("/", r"\/")
                         text = text.replace(escaped_cdn, escaped_proxy_cdn)
+                        
+                        # Se siamo in locale e la risposta arriva da Render, riscrivi gli URL di Render in URL locali
+                        if relay_render and IS_LOCAL:
+                            text = text.replace(RENDER_URL + "/vixcloud", f"{proxy_base}/vixcloud")
+                            text = text.replace(RENDER_URL + "/vixcontent", f"{proxy_base}/vixcontent")
+                            text = text.replace(RENDER_URL + "/proxy", f"{proxy_base}/proxy")
+                            text = text.replace(RENDER_URL + "/cdn", f"{proxy_base}/cdn")
+                            # Versioni escaped (per JSON/JS inline)
+                            render_escaped = RENDER_URL.replace("/", r"\/")
+                            proxy_escaped = proxy_base.replace("/", r"\/")
+                            text = text.replace(render_escaped + "\\/vixcloud", proxy_escaped + "\\/vixcloud")
+                            text = text.replace(render_escaped + "\\/vixcontent", proxy_escaped + "\\/vixcontent")
+                            text = text.replace(render_escaped + "\\/proxy", proxy_escaped + "\\/proxy")
+                            text = text.replace(render_escaped + "\\/cdn", proxy_escaped + "\\/cdn")
                         
                         log_debug(f"[DEBUG] After replace vixcloud count: {text.count('https://vixcloud.co')}")
                         log_debug(f"[DEBUG] After replace proxy/vixcloud count: {text.count(proxy_base + '/vixcloud')}")

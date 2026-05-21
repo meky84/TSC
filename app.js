@@ -6,7 +6,50 @@ const PROXY_URL = (window.location.hostname === 'localhost' && window.location.p
   ? 'http://localhost:8000'
   : (window.location.hostname.includes('onrender.com') 
     ? window.location.origin 
-    : 'https://tsc-6qr9.onrender.com');
+    : 'https://tsc84.onrender.com');
+
+// Inject debug overlay logger for TV
+(function() {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  
+  function logToOverlay(msg, type) {
+      const overlay = document.getElementById('debug-log-content');
+      if (overlay) {
+          const line = document.createElement('div');
+          line.style.color = type === 'error' ? '#fca5a5' : type === 'warn' ? '#fde047' : '#a7f3d0';
+          line.style.marginBottom = '4px';
+          line.style.wordWrap = 'break-word';
+          line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+          overlay.appendChild(line);
+          overlay.scrollTop = overlay.scrollHeight;
+      }
+  }
+  
+  function formatArgs(args) {
+      return args.map(a => {
+          if (a instanceof Error) return a.message + '\\n' + a.stack;
+          if (typeof a === 'object') {
+              try { return JSON.stringify(a); } catch(e) { return String(a); }
+          }
+          return String(a);
+      }).join(' ');
+  }
+
+  console.log = function(...args) {
+      originalLog.apply(console, args);
+      logToOverlay(formatArgs(args), 'info');
+  };
+  console.error = function(...args) {
+      originalError.apply(console, args);
+      logToOverlay(formatArgs(args), 'error');
+  };
+  console.warn = function(...args) {
+      originalWarn.apply(console, args);
+      logToOverlay(formatArgs(args), 'warn');
+  };
+})();
 
 if (window.location.protocol === 'file:') {
   const warnMsg = "ATTENZIONE: Stai aprendo l'applicazione direttamente come file locale (file://).\n\n" +
@@ -1048,6 +1091,17 @@ function bindRemote() {
   });
   
   document.addEventListener('keydown', e => {
+    // Toggle Debug Overlay on Red Button (403) or 'd' key
+    if (e.keyCode === 403 || e.key === 'd') {
+      const overlay = document.getElementById('debug-overlay');
+      if (overlay) {
+        overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
+        console.log("Debug overlay toggled. Press Red or 'd' to close.");
+      }
+      e.preventDefault();
+      return;
+    }
+
     // Intercept Back key to prevent default TV actions (like exiting app) if we are in details/player views
     if (currentView !== 'gallery' && isBackKey(e.key, e.keyCode)) {
       e.preventDefault();

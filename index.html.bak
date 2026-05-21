@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TSC - Smart TV Client</title>
+    <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+</head>
+<body>
+    <div id="search-bar" class="search-container">
+        <form id="search-form" action="" onsubmit="return false;" style="display: flex; align-items: center;">
+            <input type="search" id="search-input" placeholder="Cerca un titolo..." enterkeyhint="search" autocomplete="off" />
+            <button id="btn-clear" type="button" class="clear-btn">Cancella</button>
+        </form>
+        <div class="filters">
+            <button id="filter-all" class="filter-btn active">Tutti</button>
+            <button id="filter-movie" class="filter-btn">Film</button>
+            <button id="filter-tv" class="filter-btn">Serie TV</button>
+        </div>
+    </div>
+    <main id="gallery" class="grid"></main>
+    <div id="details-view" class="details-container" style="display: none;"></div>
+    <div id="player-view" class="player-container" style="display: none;"></div>
+    
+    <div id="debug-overlay" class="debug-overlay" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); color: #0f0; font-family: monospace; font-size: 1.2rem; padding: 20px; z-index: 9999; overflow-y: auto;">
+        <h3 style="margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px; display: flex; justify-content: space-between;">
+            <span>TSC Debug Log</span>
+            <span style="font-size: 0.9rem; color: #888;">(Press RED button or 'd' to close)</span>
+        </h3>
+        <div id="debug-log-content"></div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
