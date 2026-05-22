@@ -1,90 +1,317 @@
 #!/usr/bin/env python3
-import http.server, socketserver, urllib.request, urllib.error, ssl, json, re, os
+"""
+Server locale di sviluppo per StreamCom.
+Avvia un server HTTP che:
+  1. Serve i file locali (index.html, style.css, app.js)
+  2. Fa da proxy trasparente verso streamingcommunityz.associates
+     su /proxy/... aggirando il blocco CORS del browser.
+Uso: python server.py
+"""
+
+import http.server
+import socketserver
+import urllib.request
+import urllib.error
+import ssl
+import sys
+import os
+import json
+import re
 
 PORT = int(os.environ.get("PORT", 8000))
-IS_LOCAL = os.getenv("RENDER") is None
+CONFIG_FILE = "config.json"
+DEFAULT_BASE_SITE = "https://streamingcommunityz.associates"
+RENDER_URL = "https://tsc84.onrender.com"
+# Rileva se siamo in ambiente locale (non su Render)
+# Detect if running in Render environment (IS_LOCAL is False on Render)
+IS_LOCAL = "RENDER" not in os.environ
+# Forza il relay anche quando l'app gira su Render (usa la variabile d'ambiente FORCE_RELAY)
+# Enable forced relay on Render via FORCE_RELAY env var (set to "1" to activate)
 FORCE_RELAY = os.getenv("FORCE_RELAY", "0") == "1"
 
-class StreamComHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        # Endpoint to extract HLS stream URL from Vixcloud page
-        if self.path.startswith("/get-stream?url="):
-            target_url = self.path.split("url=")[1]
-            self._extract_stream(target_url)
-            return
-        # Proxy Vixcloud embed pages when needed
-        if self.path.startswith("/vixcloud/"):
-            self._proxy_remote("https://vixcloud.co" + self.path[len("/vixcloud"):])
-            return
-        # Proxy Vixcontent pages when needed
-        if self.path.startswith("/vixcontent/"):
-            self._proxy_remote("https://vix-content.net" + self.path[len("/vixcontent"):])
-            return
-        # Serve static files (index.html, app.js, etc.)
-        super().do_GET()
-
-    def _proxy_remote(self, target_url):
-        # Determines whether to fetch directly or via Render relay
-        if IS_LOCAL or FORCE_RELAY:
-            # Direct fetch from target (render environment has authorized IP)
-            fetch_url = target_url
-        else:
-            # Fallback: fetch via our own server as a simple proxy (should not happen in production)
-            fetch_url = target_url
+def load_config():
+    base_site = DEFAULT_BASE_SITE
+    if os.path.exists(CONFIG_FILE):
         try:
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-            req = urllib.request.Request(fetch_url, headers=headers)
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                content = resp.read()
-                self.send_response(resp.getcode())
-                for k, v in resp.getheaders():
-                    # Strip security headers that would block embedding
-                    if k.lower() in ("content-security-policy", "x-frame-options"):
-                        continue
-                    self.send_header(k, v)
-                self.end_headers()
-                self.wfile.write(content)
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                if "base_site" in config:
+                    base_site = config["base_site"].rstrip("/")
         except Exception as e:
-            self.send_error(500, str(e))
+            print(f"Errore nel caricamento di {CONFIG_FILE}: {e}. Uso il default.")
+            
+    if "://cdn." not in base_site:
+        cdn_site = base_site.replace("://", "://cdn.")
+    else:
+        cdn_site = base_site
+        
+    return base_site, cdn_site
 
-    # Extract the direct HLS stream URL from a Vixcloud embed page
-    def _extract_stream(self, url):
+BASE_SITE, CDN_SITE = load_config()
+
+LOGS_LIST = []
+
+def log_debug(msg):
+    log_line = str(msg)
+    print(log_line)
+    sys.stdout.flush()
+    LOGS_LIST.append(log_line)
+    if len(LOGS_LIST) > 200:
+        LOGS_LIST.pop(0)
+
+class StreamComHandler(http.server.SimpleHTTPRequestHandler):
+    """Gestisce sia i file locali che le richieste proxy verso il sito."""
+
+    def log_message(self, format, *args):
+        # Log all messages (including errors) to console
+        msg = format % args
+        log_debug(f"[HTTP] {msg}")
+        super().log_message(format, *args)
+
+    def _cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
+    def send_error(self, code, message=None, explain=None):
+        try:
+            self.send_response(code)
+            self._cors_headers()
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            if self.command != "HEAD" and message:
+                self.wfile.write(str(message).encode("utf-8"))
+        except Exception:
+            pass
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors_headers()
+        self.end_headers()
+
+    def do_HEAD(self):
+        self.do_GET()
+
+    def do_GET(self):
+        # --- Info di Configurazione (restituisce BASE_SITE e CDN_SITE) ---
+        if self.path == "/proxy-config":
+            self.send_response(200)
+            self._cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            if self.command != "HEAD":
+                config_data = {
+                    "base_site": BASE_SITE,
+                    "cdn_site": CDN_SITE
+                }
+                json_bytes = json.dumps(config_data).encode("utf-8")
+                self.wfile.write(json_bytes)
+                self.wfile.flush()
+            return
+
+        elif self.path == "/view-logs":
+            self.send_response(200)
+            self._cors_headers()
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            if self.command != "HEAD":
+                logs_str = "\n".join(LOGS_LIST)
+                self.wfile.write(logs_str.encode("utf-8"))
+            return
+
+
+        # --- Proxy verso il sito principale ---
+        elif self.path.startswith("/proxy/"):
+            target_path = self.path[len("/proxy"):]   # /it/archive, /it/search?q=..., ecc.
+            self._proxy_request(BASE_SITE + target_path)
+
+        # --- Proxy verso il CDN (immagini) ---
+        elif self.path.startswith("/cdn/"):
+            target_path = self.path[len("/cdn"):]
+            self._proxy_request(CDN_SITE + target_path)
+
+        # --- Proxy verso Vixcloud ---
+        elif self.path.startswith("/vixcloud/"):
+            if IS_LOCAL or FORCE_RELAY:
+                # In locale (or forced), Cloudflare blocca il nostro IP residenziale.
+                # Inoltriamo la richiesta attraverso Render (IP datacenter autorizzato).
+                log_debug(f"[RELAY] Relaying /vixcloud/ through Render: {RENDER_URL}{self.path}")
+                self._proxy_request(RENDER_URL + self.path, relay_render=True)
+            else:
+                target_path = self.path[len("/vixcloud"):]
+                self._proxy_request("https://vixcloud.co" + target_path)
+
+        # --- Proxy verso Vixcontent (CDN video) ---
+        elif self.path.startswith("/vixcontent/"):
+            if IS_LOCAL or FORCE_RELAY:
+                log_debug(f"[RELAY] Relaying /vixcontent/ through Render: {RENDER_URL}{self.path}")
+                self._proxy_request(RENDER_URL + self.path, relay_render=True)
+            else:
+                parts = self.path[len("/vixcontent/"):].split("/", 1)
+                subdomain = parts[0]
+                remaining_path = parts[1] if len(parts) > 1 else ""
+                target_url = f"https://{subdomain}.vix-content.net/{remaining_path}"
+                self._proxy_request(target_url)
+
+        # --- File locali con fallback proxy ---
+        else:
+            clean_path = self.path.split("?")[0].lstrip("/")
+            local_path = os.path.join(os.getcwd(), clean_path) if clean_path else os.path.join(os.getcwd(), "index.html")
+            
+            if os.path.exists(local_path) and os.path.isfile(local_path):
+                super().do_GET()
+            else:
+                # Controlla Referer per instradare le richieste di asset relativi al host giusto
+                # Navigation focusable elements (playerContainer removed to keep Enter key behavior clean)
+                # const focusableIds = ['titleId', 'episodeId', 'btn-hls-proxy', 'btn-iframe-vixcloud', 'btn-hls-direct'];
+                referer = self.headers.get("Referer", "")
+                if "/vixcloud/" in referer or "vixcloud.co" in referer:
+                    if IS_LOCAL:
+                        log_debug(f"[LOCAL] Relaying vixcloud asset through Render: {RENDER_URL}/vixcloud{self.path}")
+                        self._proxy_request(RENDER_URL + "/vixcloud" + self.path, relay_render=True)
+                    else:
+                        self._proxy_request("https://vixcloud.co" + self.path)
+                else:
+                    self._proxy_request(BASE_SITE + self.path)
+
+    def _proxy_request(self, url, relay_render=False):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        ctx.verify_mode   = ssl.CERT_NONE
+
+        headers = {
+            "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/124.0.0.0",
+            "Accept":          "*/*",
+            "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+        }
+
+        # Copia gli header Range ed altri essenziali per lo streaming video
+        for h in ["Range", "If-Range"]:
+            if h in self.headers:
+                headers[h] = self.headers[h]
+
+        # Configura Referer e Origin autorizzati per bypassare i controlli WAF/Cloudflare
+        if "vixcloud.co" in url or "vix-content.net" in url or "streamingcommunity" in url:
+            headers["Referer"] = "https://streamingcommunityz.associates/"
+            headers["Origin"] = "https://streamingcommunityz.associates"
+
         req = urllib.request.Request(url, headers=headers)
+
         try:
             with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                html = resp.read().decode('utf-8', errors='ignore')
-                token_match = re.search(r"['\"]token['\"]\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-                expires_match = re.search(r"['\"]expires['\"]\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-                playlist_match = re.search(r"url\s*[:=]\s*['\"]([^'\"]+/playlist/\d+)[^'\"]*['\"]", html)
-                if not (token_match and expires_match and playlist_match):
-                    simple_match = re.search(r"(https?://[^\s\"\']+\.m3u8)", html)
-                    if simple_match:
-                        stream_url = simple_match.group(1)
-                    else:
-                        self.send_error(500, "Unable to extract stream URL from Vixcloud page")
-                        return
-                else:
-                    token = token_match.group(1)
-                    expires = expires_match.group(1)
-                    pid = re.search(r"/playlist/(\d+)", playlist_match.group(1)).group(1)
-                    stream_url = f"https://vixcloud.co/playlist/{pid}?token={token}&expires={expires}&b=1"
-                payload = json.dumps({"stream_url": stream_url}).encode('utf-8')
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Content-Length", str(len(payload)))
+                body         = resp.read()
+                content_type = resp.headers.get("Content-Type", "")
+
+                # Se la risorsa contiene testo/script/playlist, riscrivi i domini Vixcloud per forzare il same-origin
+                if any(t in content_type for t in ["text/html", "javascript", "mpegurl", "mpegURL", "json", "xml"]):
+                    try:
+                        text = body.decode("utf-8", errors="ignore")
+                        host = self.headers.get("Host", f"localhost:{PORT}")
+                        proto = self.headers.get("X-Forwarded-Proto", "http" if "localhost" in host or "127.0.0.1" in host else "https")
+                        proxy_base = f"{proto}://{host}"
+                        log_debug(f"[DEBUG] Proxying: {url} | Content-Type: {content_type}")
+                        log_debug(f"[DEBUG] proxy_base: {proxy_base}")
+                        log_debug(f"[DEBUG] Before replace vixcloud count: {text.count('https://vixcloud.co')}")
+                        
+                        text = text.replace("https://vixcloud.co", f"{proxy_base}/vixcloud")
+                        text = text.replace(r"https:\/\/vixcloud.co", fr"{proxy_base}\/vixcloud")
+                        text = re.sub(r"https://([a-zA-Z0-9\-]+)\.vix\-content\.net", fr"{proxy_base}/vixcontent/\1", text)
+                        vixcontent_repl = proxy_base.replace('/', '\\/') + '\\/vixcontent\\/\\1'
+                        text = re.sub(r"https:\\/\\/([a-zA-Z0-9\-]+)\.vix\-content\.net", vixcontent_repl, text)
+                        
+                        # Riscrivi anche il dominio di StreamingCommunity per convogliare gli asset statici (JS/CSS/fonts) nel proxy ed evitare errori CORS
+                        text = text.replace(BASE_SITE, f"{proxy_base}/proxy")
+                        escaped_base = BASE_SITE.replace("/", r"\/")
+                        escaped_proxy = f"{proxy_base}/proxy".replace("/", r"\/")
+                        text = text.replace(escaped_base, escaped_proxy)
+
+                        text = text.replace(CDN_SITE, f"{proxy_base}/cdn")
+                        escaped_cdn = CDN_SITE.replace("/", r"\/")
+                        escaped_proxy_cdn = f"{proxy_base}/cdn".replace("/", r"\/")
+                        text = text.replace(escaped_cdn, escaped_proxy_cdn)
+                        
+                        # Se siamo in locale e la risposta arriva da Render, riscrivi gli URL di Render in URL locali
+                        if relay_render and IS_LOCAL:
+                            text = text.replace(RENDER_URL + "/vixcloud", f"{proxy_base}/vixcloud")
+                            text = text.replace(RENDER_URL + "/vixcontent", f"{proxy_base}/vixcontent")
+                            text = text.replace(RENDER_URL + "/proxy", f"{proxy_base}/proxy")
+                            text = text.replace(RENDER_URL + "/cdn", f"{proxy_base}/cdn")
+                            # Versioni escaped (per JSON/JS inline)
+                            render_escaped = RENDER_URL.replace("/", r"\/")
+                            proxy_escaped = proxy_base.replace("/", r"\/")
+                            text = text.replace(render_escaped + "\\/vixcloud", proxy_escaped + "\\/vixcloud")
+                            text = text.replace(render_escaped + "\\/vixcontent", proxy_escaped + "\\/vixcontent")
+                            text = text.replace(render_escaped + "\\/proxy", proxy_escaped + "\\/proxy")
+                            text = text.replace(render_escaped + "\\/cdn", proxy_escaped + "\\/cdn")
+                        
+                        log_debug(f"[DEBUG] After replace vixcloud count: {text.count('https://vixcloud.co')}")
+                        log_debug(f"[DEBUG] After replace proxy/vixcloud count: {text.count(proxy_base + '/vixcloud')}")
+                        
+                        # Rimuovi script pubblicitari e anti-debugger da Vixcloud
+                        if "text/html" in content_type:
+                            # Rimuoviamo solo gli script noti di advertising/tracking; manteniamo gli script del player.
+                            text = re.sub(r'<script[^>]*sechw\.com[^>]*>.*?</script>', '', text, flags=re.DOTALL)
+                            # (Gli altri pattern di rimozione sono stati commentati per preservare il UI del player.)
+                            # text = re.sub(r'<script[^>]*>?(?:(?!<script)[\s\S])*?minimalUserResponseInMiliseconds[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            # text = re.sub(r'<script[^>]*>?(?:(?!<script)[\s\S])*?oe\.entries[\s\S]*?</script>', '', text, flags=re.IGNORECASE)
+                            # Previene i redirect javascript forzati sostituendo window.top e location.replace
+                            text = text.replace("window.top", "window.self")
+                            text = text.replace("top.location", "self.location")
+                            
+                        body = text.encode("utf-8")
+                    except Exception as e:
+                        log_debug(f"[ERROR] Exception in rewrite: {type(e)} {e}")
+
+                self.send_response(resp.status)
+                if content_type:
+                    self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                
+                # Copia intestazioni per lo streaming e range requests
+                for h in ["Content-Range", "Accept-Ranges", "Content-Encoding"]:
+                    val = resp.headers.get(h)
+                    if val is not None:
+                        self.send_header(h, val)
+
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
+                self._cors_headers()
                 self.end_headers()
-                self.wfile.write(payload)
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+
+        except urllib.error.HTTPError as e:
+            self.send_error(e.code, str(e))
+        except urllib.error.URLError as e:
+            self.send_error(502, f"Proxy error: {e.reason}")
         except Exception as e:
             self.send_error(500, str(e))
 
-if __name__ == "__main__":
+
+def main():
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), StreamComHandler) as httpd:
-        httpd.serve_forever()
+        print("=" * 55)
+        print("  StreamCom – Server locale avviato")
+        print("=" * 55)
+        print(f"  Apri nel browser:  http://localhost:{PORT}")
+        print(f"  Proxy sito:        http://localhost:{PORT}/proxy/it/archive")
+        print(f"  Proxy CDN:         http://localhost:{PORT}/cdn/...")
+        print("  Premi Ctrl+C per fermare.")
+        print("=" * 55)
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nServer fermato.")
+            sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

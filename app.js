@@ -8,48 +8,6 @@ const PROXY_URL = (window.location.hostname === 'localhost' && window.location.p
     ? window.location.origin 
     : 'https://tsc84.onrender.com');
 
-// Inject debug overlay logger for TV
-(function() {
-  const originalLog = console.log;
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  
-  function logToOverlay(msg, type) {
-      const overlay = document.getElementById('debug-log-content');
-      if (overlay) {
-          const line = document.createElement('div');
-          line.style.color = type === 'error' ? '#fca5a5' : type === 'warn' ? '#fde047' : '#a7f3d0';
-          line.style.marginBottom = '4px';
-          line.style.wordWrap = 'break-word';
-          line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-          overlay.appendChild(line);
-          overlay.scrollTop = overlay.scrollHeight;
-      }
-  }
-  
-  function formatArgs(args) {
-      return args.map(a => {
-          if (a instanceof Error) return a.message + '\\n' + a.stack;
-          if (typeof a === 'object') {
-              try { return JSON.stringify(a); } catch(e) { return String(a); }
-          }
-          return String(a);
-      }).join(' ');
-  }
-
-  console.log = function(...args) {
-      originalLog.apply(console, args);
-      logToOverlay(formatArgs(args), 'info');
-  };
-  console.error = function(...args) {
-      originalError.apply(console, args);
-      logToOverlay(formatArgs(args), 'error');
-  };
-  console.warn = function(...args) {
-      originalWarn.apply(console, args);
-      logToOverlay(formatArgs(args), 'warn');
-  };
-})();
 
 if (window.location.protocol === 'file:') {
   const warnMsg = "ATTENZIONE: Stai aprendo l'applicazione direttamente come file locale (file://).\n\n" +
@@ -351,6 +309,8 @@ function getGridColumns() {
 function showDetails(item) {
   currentView = 'details';
   detailsEl.style.display = 'flex';
+  // Hide gallery thumbnails when showing details
+  if (galleryEl) galleryEl.style.display = 'none';
   
   // Remove focus class from gallery items
   const activeCard = galleryEl.querySelector('.card.focused');
@@ -619,12 +579,11 @@ function updateDetailsFocus() {
   }
 }// Get the video element from the player view
 function getPlayerVideo() {
-  return document.getElementById('native-player');
+  return null;
 }
 
-// Extract the direct HLS stream URL from the StreamingCommunity embed URL
-async function extractStreamUrl(embedUrl) {
-  // 1. Fetch StreamingCommunity embed page
+// Extract Vixcloud iframe URL from StreamingCommunity embed URL
+async function extractVixcloudUrl(embedUrl) {
   console.log("Fetching SC embed iframe:", embedUrl);
   const scResponse = await proxyFetch(embedUrl);
   const scHtml = await scResponse.text();
@@ -632,187 +591,95 @@ async function extractStreamUrl(embedUrl) {
   // Extract Vixcloud iframe URL
   const iframeMatch = scHtml.match(/<iframe[^>]+src=["']([^"']+)["']/);
   if (!iframeMatch) throw new Error("Vixcloud iframe non trovato nella pagina di embed");
-  const vixcloudUrl = iframeMatch[1].replace(/&amp;/g, '&');
-  
-  // 2. Fetch Vixcloud page
-  console.log("Fetching Vixcloud HTML:", vixcloudUrl);
-  
-  const vixResponse = await proxyFetch(vixcloudUrl);
-  const vixHtml = await vixResponse.text();
-  
-  // Extract window.masterPlaylist params using regex
-  const tokenMatch = vixHtml.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
-  const expiresMatch = vixHtml.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
-  const urlMatch = vixHtml.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
-  
-  if (!tokenMatch || !expiresMatch || !urlMatch) {
-    throw new Error("Impossibile estrarre i parametri di streaming da Vixcloud");
-  }
-  
-  const token = tokenMatch[1];
-  const expires = expiresMatch[1];
-  const playlistBaseUrl = urlMatch[1];
-  
-  // 3. Construct stream URL
-  const cleanPlaylistUrl = playlistBaseUrl.split('?')[0];
-  const streamUrl = `${cleanPlaylistUrl}?token=${token}&expires=${expires}&b=1`;
-  
-  return { type: 'hls', url: streamUrl };
+  return iframeMatch[1].replace(/&amp;/g, '&');
 }
 
-// Launch Video Player using HTML5 video tag with direct HLS stream
+// Launch Video Player using Vixcloud iframe
 async function playTitle(titleId, episodeId = null) {
   try {
     currentView = 'player';
     playerEl.style.display = 'block';
+    // Hide gallery thumbnails while playing
+    if (galleryEl) galleryEl.style.display = 'none';
+    // Hide details view while playing
+    if (detailsEl) detailsEl.style.display = 'none';
     playerEl.innerHTML = `
-      <div id="debug-overlay" style="position: absolute; top: 10px; left: 10px; z-index: 9999; color: #0f0; background: rgba(0,0,0,0.8); padding: 10px; font-size: 14px; font-family: monospace; white-space: pre-wrap; max-width: 80%; pointer-events: none;">[Debug Log]</div>
-      <video id="native-player" autoplay style="width: 100%; height: 100%; background: #000;"></video>
+      <div id="iframe-container" style="width: 100%; height: 100%; background: #000; position: relative;"
+      ></div>
     `;
     
-    const debugLog = document.getElementById('debug-overlay');
-    const log = (msg) => { debugLog.innerHTML += `\n${msg}`; console.log(msg); };
-    
-    log(`Fetching embed URL...`);
+    console.log("Fetching embed URL...");
     const embedUrl = await fetchEmbedUrl(titleId, episodeId);
     
-    log(`Extracting stream URL from: ${embedUrl.substring(0, 50)}...`);
-    const streamData = await extractStreamUrl(embedUrl);
+    console.log("Extracting Vixcloud URL...");
+    const vixcloudUrl = await extractVixcloudUrl(embedUrl);
+    console.log("Extracted URL:", vixcloudUrl);
     
-    const streamUrl = streamData.url;
-    log(`Stream URL ready.`);
-    
-    const video = document.getElementById('native-player');
-    
-    video.addEventListener('error', (e) => {
-      const err = video.error;
-      log(`Native Video Error: ${err ? err.code + ' ' + err.message : 'Unknown'}`);
-    });
-    
-    const isSafariPlayer = navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome') && !navigator.userAgent.includes('Tizen');
-    const isTizenPlayer = navigator.userAgent.includes('Tizen') || window.tizen !== undefined;
-    const hasAVPlay = (typeof webapis !== 'undefined' && webapis.avplay);
-    
-    log(`Browser detection: Safari=${isSafariPlayer}, Tizen=${isTizenPlayer}, AVPlay=${hasAVPlay}`);
-    
-    if (hasAVPlay) {
-      log(`Using Tizen AVPlay API...`);
-      playerEl.innerHTML += `<object id="av-player" type="application/avplayer" style="width: 100%; height: 100%; position: absolute; top:0; left:0; z-index: 10;"></object>`;
-      document.getElementById('debug-overlay').style.zIndex = "9999";
-      
-      try {
-        webapis.avplay.open(streamUrl);
-        webapis.avplay.setDisplayRect(0, 0, window.innerWidth, window.innerHeight);
-        
-        webapis.avplay.setListener({
-          onbufferingstart: function() { log("AVPlay: Buffering start"); },
-          onbufferingprogress: function(percent) { /* log("AVPlay: Buffering " + percent + "%"); */ },
-          onbufferingcomplete: function() { log("AVPlay: Buffering complete"); },
-          onerror: function(eventType) { log("AVPlay Error: " + eventType); },
-          onevent: function(eventType, eventData) { log("AVPlay Event: " + eventType + " " + (eventData || "")); },
-          onstreamcompleted: function() { log("AVPlay: Stream completed"); stopPlayer(); }
-        });
-        
-        try {
-          const props = { "UserAgent": navigator.userAgent };
-          webapis.avplay.setStreamingProperty("SET_PROPERTIES", JSON.stringify(props));
-        } catch(e) { log("AVPlay setProperty warning: " + e.message); }
-        
-        webapis.avplay.prepareAsync(function() {
-          log("AVPlay: prepareAsync success, starting playback...");
-          webapis.avplay.play();
-        }, function(error) {
-          log("AVPlay prepareAsync error: " + error.name + " " + error.message);
-        });
-        
-        playerEl._hasAVPlay = true;
-      } catch (e) {
-        log(`AVPlay Exception: ${e.name} ${e.message}`);
-      }
-    } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      log(`Using hls.js player with CORS proxy...`);
-      // Proxy the m3u8 playlist through our Render proxy to bypass CORS on Tizen AND keep the IP matching!
-      let proxiedStreamUrl = streamUrl;
-      if (streamUrl.includes('https://vixcloud.co')) {
-        proxiedStreamUrl = streamUrl.replace('https://vixcloud.co', PROXY_URL + '/vixcloud');
-      } else if (!streamUrl.startsWith('http') && !streamUrl.startsWith('/')) {
-        proxiedStreamUrl = `${PROXY_URL}/proxy/${streamUrl}`;
-      }
-      
-      const hls = new Hls({
-        maxMaxBufferLength: 10,
-        enableWorker: true,
-        debug: false
-      });
-      hls.loadSource(proxiedStreamUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, function() {
-        log(`HLS Manifest parsed. Attempting play...`);
-        video.play().catch(e => log(`Play failed: ${e.message}`));
-      });
-      hls.on(Hls.Events.ERROR, function(event, data) {
-        log(`HLS Error [${data.type}]: ${data.details}`);
-        if (data.fatal) {
-          log(`Fatal error! Trying to recover...`);
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Se fallisce il proxy, prova a fallback sul Native Player senza proxy
-              log(`Network error, falling back to Native Player...`);
-              video.src = streamUrl;
-              video.play().catch(e => log(`Fallback Play failed: ${e.message}`));
-              hls.destroy();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              break;
-          }
-        }
-      });
-      playerEl._hlsInstance = hls;
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      log(`Fallback Native Player (Hls.js not supported)...`);
-      video.src = streamUrl;
-      video.play().catch(e => log(`Play failed: ${e.message}`));
+    // Convert Vixcloud URL back to direct/real URL (Method 2)
+    let finalIframeUrl = vixcloudUrl;
+    if (finalIframeUrl.startsWith('/vixcloud')) {
+      finalIframeUrl = 'https://vixcloud.co' + finalIframeUrl.substring('/vixcloud'.length);
     } else {
-      log(`Error: Browser does not support HLS or Hls.js`);
-      throw new Error("Il tuo browser non supporta la riproduzione HLS.");
+      finalIframeUrl = finalIframeUrl.replace(/https?:\/\/[^\/]+\/vixcloud/, 'https://vixcloud.co');
     }
+    console.log("Real Vixcloud URL:", finalIframeUrl);
+    
+    const container = document.getElementById('iframe-container');
+    container.innerHTML = `
+      <iframe id="vix-iframe" src="${finalIframeUrl}" style="width: 100%; height: 100%; border: none;" allow="autoplay; fullscreen"></iframe>
+      <div id="iframe-return-hint" style="position: absolute; bottom: 20px; right: 20px; color: white; background: rgba(0,0,0,0.7); padding: 10px; font-size: 18px; z-index: 10000; pointer-events: none; border-radius: 5px;">
+        Premi [Return/Back] per uscire
+      </div>
+    `;
+    // Create overlay to capture key events (including Back/Escape)
+    const overlay = document.createElement('div');
+    overlay.id = 'player-key-overlay';
+    overlay.tabIndex = 0; // Make focusable
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.zIndex = '9999';
+    overlay.style.background = 'transparent';
+    container.appendChild(overlay);
+    // Focus the overlay to receive key events
+    overlay.focus();
+    // Handle Back/Escape key to exit player
+    overlay.addEventListener('keydown', function(e) {
+      if (isBackKey(e.key, e.keyCode)) {
+        e.preventDefault();
+        stopPlayer();
+        e.stopPropagation(); // Prevent document-level back handling
+      }
+    });
+    // No need to focus iframe; overlay will capture navigation keys
+    
   } catch (err) {
     console.error(err);
-    if (document.getElementById('debug-overlay')) {
-      document.getElementById('debug-overlay').innerHTML += `\nEXCEPTION: ${err.message}`;
-    } else {
-      alert("Errore caricamento player: " + err.message);
-    }
-    setTimeout(() => stopPlayer(), 10000); // Wait 10s to read log before closing
+    alert("Errore caricamento player: " + err.message);
+    stopPlayer();
   }
 }
 
 // Close player and return to details
 function stopPlayer() {
   currentView = 'details';
+  // Hide player view
   playerEl.style.display = 'none';
-  
-  if (playerEl._hasAVPlay && typeof webapis !== 'undefined' && webapis.avplay) {
-    try {
-      webapis.avplay.stop();
-      webapis.avplay.close();
-    } catch (e) {}
-    playerEl._hasAVPlay = false;
+  playerEl.innerHTML = '';
+  // Show details view again
+  if (detailsEl) {
+    detailsEl.style.display = 'flex';
+    // Ensure details container can receive focus
+    detailsEl.setAttribute('tabindex', '-1');
+    detailsEl.focus();
   }
-  
-  // Clean up hls.js instance if exists
-  if (playerEl._hlsInstance) {
-    try {
-      playerEl._hlsInstance.destroy();
-    } catch (e) {}
-    playerEl._hlsInstance = null;
-  }
-  
-  playerEl.innerHTML = ''; // Destroys video element to stop sound and video
+  // Keep gallery hidden (we were viewing a specific title)
+  if (galleryEl) galleryEl.style.display = 'none';
+  // Reset focus area to buttons and highlight Play button
+  detailsFocusArea = 'buttons';
+  detailsButtonIndex = 0;
   updateDetailsFocus();
 }
 
@@ -903,6 +770,8 @@ function handleDetailsKeys(key, keyCode) {
   if (isBackKey(key, keyCode)) {
     currentView = 'gallery';
     detailsEl.style.display = 'none';
+    // Ensure gallery is visible when returning to home
+    if (galleryEl) galleryEl.style.display = 'flex';
     loadedTitleData = null;
     updateGalleryFocus();
     return;
@@ -1006,18 +875,19 @@ function handleDetailsKeys(key, keyCode) {
 
 function handlePlayerKeys(key, keyCode) {
   if (isBackKey(key, keyCode)) {
+    // Back/Escape should exit player and return to details
     stopPlayer();
     return;
   }
-  
+
   const video = getPlayerVideo();
   if (!video) return;
-  
+
   // Play/Pause controls (Toggle / Play / Pause keys)
   const isPlayKey = key === 'MediaPlay' || keyCode === 415;
   const isPauseKey = key === 'MediaPause' || keyCode === 19;
   const isToggleKey = key === 'Enter' || key === ' ' || key === 'MediaPlayPause' || keyCode === 10252;
-  
+
   if (isPlayKey) {
     try { video.play(); } catch (err) {}
   } else if (isPauseKey) {
@@ -1031,16 +901,12 @@ function handlePlayerKeys(key, keyCode) {
       }
     } catch (err) {}
   }
-  
+
   // Seek controls with Left/Right Arrows
   if (key === 'ArrowRight') {
-    try {
-      video.currentTime += 10; // Seek forward 10s
-    } catch (err) {}
+    try { video.currentTime += 10; } catch (err) {}
   } else if (key === 'ArrowLeft') {
-    try {
-      video.currentTime -= 10; // Seek backward 10s
-    } catch (err) {}
+    try { video.currentTime -= 10; } catch (err) {}
   }
 }
 
@@ -1090,18 +956,14 @@ function bindRemote() {
     }
   });
   
+  // Global key handler for Back/Escape when in player view
   document.addEventListener('keydown', e => {
-    // Toggle Debug Overlay on Red Button (403) or 'd' key
-    if (e.keyCode === 403 || e.key === 'd') {
-      const overlay = document.getElementById('debug-overlay');
-      if (overlay) {
-        overlay.style.display = overlay.style.display === 'none' ? 'block' : 'none';
-        console.log("Debug overlay toggled. Press Red or 'd' to close.");
-      }
+    if (currentView === 'player' && isBackKey(e.key, e.keyCode)) {
       e.preventDefault();
+      stopPlayer();
+      e.stopPropagation();
       return;
     }
-
     // Intercept Back key to prevent default TV actions (like exiting app) if we are in details/player views
     if (currentView !== 'gallery' && isBackKey(e.key, e.keyCode)) {
       e.preventDefault();
